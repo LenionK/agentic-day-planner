@@ -36,6 +36,8 @@ def schedule(tasks: list[Task], day: DayConfig) -> Schedule:
         present[n] = model.NewBoolVar(f"present_{n}")
         starts[n] = model.NewIntVar(lo, hi, f"start_{n}")
         end = model.NewIntVar(lo + d, hi + d, f"end_{n}")
+        if t.required:
+            model.Add(present[n] == 1)
         interval = model.NewOptionalIntervalVar(starts[n], d, end, present[n], f"interval_{n}")
         intervals.append(interval)
 
@@ -43,7 +45,11 @@ def schedule(tasks: list[Task], day: DayConfig) -> Schedule:
     model.AddNoOverlap(intervals)
 
     # 3. obiettivo: massimizzare la somma delle priorità dei task inclusi
-    model.Maximize(sum(t.priority * present[t.id] for t in tasks if t.id in present))
+
+    base = len(tasks) + 1
+    weight = {p: base ** (p - 1) for p in range(1, 6)}
+
+    model.Maximize(sum(weight[t.priority] * present[t.id] for t in tasks if t.id in present))
 
     # 4. risolvi, con un limite di 5 secondi
     solver = cp_model.CpSolver()

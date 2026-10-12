@@ -101,3 +101,17 @@ def test_impossible_task_is_unscheduled():
 
     assert result.unscheduled == ["early"]
     assert set(by_id(result)) == {"study"}
+
+
+def test_required_task_is_kept_over_normal_tasks():
+    day = DayConfig(day_start_min=480, day_end_min=600)  # 120 minuti
+    tasks = [
+        Task(id="lunch", title="Pranzo", duration_min=60, priority=1, required=True),
+        Task(id="n1", title="Normale 1", duration_min=60, priority=5),
+        Task(id="n2", title="Normale 2", duration_min=60, priority=5),
+    ]
+
+    result = schedule(tasks, day)
+
+    assert "lunch" in by_id(result)
+    assert len(result.unscheduled) == 1

@@ -32,6 +32,7 @@ class Interval(BaseModel):
 class Task(BaseModel):
     id: str
     title: str
+    required: bool = False
     duration_min: int = Field(gt=0, le=720)
     priority: int = Field(default=3, ge=1, le=5)  # 5 = più importante
     earliest_start_min: int | None = Field(default=None, ge=0, le=1440)
