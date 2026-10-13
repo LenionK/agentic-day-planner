@@ -117,3 +117,44 @@ def test_required_task_is_kept_over_normal_tasks():
 
     assert "lunch" in by_id(result)
     assert len(result.unscheduled) == 1
+
+
+def test_required_task_outside_the_day_makes_the_plan_infeasible():
+    day = DayConfig(day_start_min=480, day_end_min=1080)  # 08:00-18:00
+    tasks = [
+        Task(id="study", title="Studio", duration_min=60),
+        # obbligatorio alle 07:00, ma la giornata inizia alle 08:00
+        Task(id="dentist", title="Dentista", duration_min=60, fixed_start_min=420, required=True),
+    ]
+
+    result = schedule(tasks, day)
+
+    assert result.status == "INFEASIBLE"
+    assert result.conflicts == ["dentist"]
+    assert result.scheduled == []
+
+
+def test_overlapping_required_tasks_are_reported_as_conflict():
+    day = DayConfig(day_start_min=480, day_end_min=1080)
+    tasks = [
+        Task(id="lunch", title="Pranzo", duration_min=60, fixed_start_min=780, required=True),
+        Task(id="gym", title="Palestra", duration_min=60, required=True),
+        Task(id="call", title="Chiamata", duration_min=60, fixed_start_min=810, required=True),
+        Task(id="study", title="Studio", duration_min=120),
+    ]
+
+    result = schedule(tasks, day)
+
+    assert result.status == "INFEASIBLE"
+    # la palestra entra comunque: il conflitto è solo tra pranzo e chiamata
+    assert result.conflicts == ["lunch", "call"]
+
+
+def test_feasible_plan_has_no_conflicts():
+    day = DayConfig(day_start_min=480, day_end_min=600)
+    tasks = [Task(id="a", title="A", duration_min=60, required=True)]
+
+    result = schedule(tasks, day)
+
+    assert result.status == "OPTIMAL"
+    assert result.conflicts == []

@@ -1,7 +1,5 @@
 import pytest
 from pydantic import BaseModel, Field, ValidationError
-
-from planner.llm.base import LLMClient
 from tests.fakes import FakeClient
 
 

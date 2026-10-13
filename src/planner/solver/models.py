@@ -82,4 +82,6 @@ class Schedule(BaseModel):
     status: str  # OPTIMAL | FEASIBLE | INFEASIBLE
     scheduled: list[ScheduledTask] = Field(default_factory=list)
     unscheduled: list[str] = Field(default_factory=list)  # id dei task esclusi
+    # id dei task obbligatori che rendono la giornata impossibile (solo se INFEASIBLE)
+    conflicts: list[str] = Field(default_factory=list)
     objective: float | None = None
