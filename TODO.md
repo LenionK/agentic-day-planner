@@ -10,7 +10,7 @@
 - [x] Task obbligatori (`required`)
 
 ## Prossimi passi
-- [ ] Client LLM (Ollama, con interfaccia per cambiare provider)
+- [x] Client LLM (Ollama, con interfaccia per cambiare provider)
 - [ ] Parser: frase libera → lista di `Task`, con output strutturato e retry
 - [ ] Database: tabelle, view e stored procedure
 - [ ] Memoria con pgvector (preferenze e giornate passate)

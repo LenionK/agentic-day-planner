@@ -2,24 +2,12 @@ import pytest
 from pydantic import BaseModel, Field, ValidationError
 
 from planner.llm.base import LLMClient
+from tests.fakes import FakeClient
 
 
 class Item(BaseModel):
     name: str
     qty: int = Field(gt=0)
-
-
-class FakeClient(LLMClient):
-    """Restituisce risposte preparate, una per chiamata, e registra i messaggi ricevuti."""
-
-    def __init__(self, responses: list[str], max_retries: int = 2) -> None:
-        super().__init__(max_retries)
-        self.responses = list(responses)
-        self.calls: list[list[dict]] = []
-
-    def _complete(self, messages: list[dict], schema: type[BaseModel]) -> str:
-        self.calls.append(list(messages))
-        return self.responses.pop(0)
 
 
 MESSAGES = [{"role": "user", "content": "una mela"}]
