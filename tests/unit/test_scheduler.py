@@ -30,8 +30,9 @@ def test_tasks_that_fit_are_all_scheduled_without_overlap():
         assert item.end_min - item.start_min == task.duration_min
         assert day.day_start_min <= item.start_min
         assert item.end_min <= day.day_end_min
-    assert not overlaps(s["study"].start_min, s["study"].end_min,
-                        s["gym"].start_min, s["gym"].end_min)
+    assert not overlaps(
+        s["study"].start_min, s["study"].end_min, s["gym"].start_min, s["gym"].end_min
+    )
 
 
 def test_lowest_priority_task_is_dropped_when_day_is_full():
@@ -46,6 +47,7 @@ def test_lowest_priority_task_is_dropped_when_day_is_full():
 
     assert result.unscheduled == ["a"]
     assert set(by_id(result)) == {"b", "c"}
+
 
 def test_fixed_start_is_respected():
     day = DayConfig(day_start_min=480, day_end_min=1080)

@@ -29,3 +29,4 @@
 - **Task obbligatori:** implementati con l'opzione ___ (A = vincolo rigido, B = peso dominante).
 - **Conflitto tra obbligatori:** sceglie l'utente. Il Critico rileva il conflitto e il grafo si ferma per chiedere (interrupt di LangGraph).
 - **Fasce bloccate:** rimosse, i task con finestra coprono gli stessi casi in modo più flessibile. Da riconsiderare solo per importare un calendario esterno.
+- **Priorità suggerita dal Parser:** il modello propone una priorità in base agli indizi nel testo, l'utente la conferma o la corregge prima di generare il piano.
