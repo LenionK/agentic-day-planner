@@ -21,6 +21,7 @@ dependencies = [
     "psycopg[binary,pool]>=3.2",
     "pgvector>=0.3",
     "icalendar>=6.0",
+    "langchain-ollama",
     "httpx>=0.27",
 ]
 

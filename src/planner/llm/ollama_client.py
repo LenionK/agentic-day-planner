@@ -11,19 +11,35 @@ class OllamaClient(LLMClient):
         host: str = "http://localhost:11434",
         temperature: float = 0.0,
         num_ctx: int = 8192,
+        num_predict: int = 2048,
+        repeat_penalty: float | None = None,
         max_retries: int = 2,
     ) -> None:
         super().__init__(max_retries)
         self.model = model
+        self.host = host
         self.temperature = temperature
         self.num_ctx = num_ctx
+        self.num_predict = num_predict
+        self.repeat_penalty = repeat_penalty
         self._client = Client(host=host)
+
+    def _options(self) -> dict:
+        """Generation options sent to Ollama; unset values are left to Ollama's defaults."""
+        options = {
+            "temperature": self.temperature,
+            "num_ctx": self.num_ctx,
+            "num_predict": self.num_predict,
+        }
+        if self.repeat_penalty is not None:
+            options["repeat_penalty"] = self.repeat_penalty
+        return options
 
     def _complete(self, messages: list[dict], schema: type[BaseModel]) -> str:
         response = self._client.chat(
             model=self.model,
             messages=messages,
             format=schema.model_json_schema(),
-            options={"temperature": self.temperature, "num_ctx": self.num_ctx},
+            options=self._options(),
         )
         return response.message.content
