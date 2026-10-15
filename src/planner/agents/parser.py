@@ -1,4 +1,5 @@
 import re
+from collections.abc import Sequence
 
 from pydantic import BaseModel, Field
 
@@ -66,11 +67,16 @@ def _same_time(a: str, b: str) -> bool:
         return False
 
 
-def clean_times(draft: TaskDraft, text: str) -> tuple[TaskDraft, list[str]]:
+def clean_times(
+    draft: TaskDraft, text: str, other_sources: Sequence[str] = ()
+) -> tuple[TaskDraft, list[str]]:
     """Remove times the LLM made up, and explain each removal.
 
     1. A time whose hour does not appear anywhere in the user's sentence is dropped.
-    2. An earliest_start equal to the deadline is dropped: a zero-length window
+    2. A time missing from this task's source but present in the source of another
+       task is dropped: the model moved it to the wrong task. The sentence is still
+       the fallback, because the model sometimes cuts a source short.
+    3. An earliest_start equal to the deadline is dropped: a zero-length window
        is a model artifact, never what the user meant.
     Real inconsistencies (two different times both in the sentence) are kept,
     so draft_to_task can reject them.
@@ -81,9 +87,18 @@ def clean_times(draft: TaskDraft, text: str) -> tuple[TaskDraft, list[str]]:
     warnings: list[str] = []
 
     for field, value in times.items():
-        if value is not None and not _hour_is_mentioned(value, text):
+        if value is None:
+            continue
+        if not _hour_is_mentioned(value, text):
             times[field] = None
             warnings.append(f"{draft.title}: ignorato {field} {value} (non compare nella frase)")
+        elif not _hour_is_mentioned(value, draft.source) and any(
+            _hour_is_mentioned(value, other) for other in other_sources
+        ):
+            times[field] = None
+            warnings.append(
+                f"{draft.title}: ignorato {field} {value} (compare solo in un altro task)"
+            )
 
     earliest, deadline = times["earliest_start"], times["deadline"]
     if earliest is not None and deadline is not None and _same_time(earliest, deadline):
@@ -180,8 +195,10 @@ def parse_day(text: str, client: LLMClient) -> ParseResult:
     rejected: list[RejectedTask] = []
     sources: dict[str, str] = {}
     warnings: list[str] = []
+    all_sources = [draft.source for draft in parsed.tasks]
     for index, draft in enumerate(parsed.tasks, start=1):
-        cleaned, draft_warnings = clean_times(draft, text)
+        other_sources = all_sources[: index - 1] + all_sources[index:]
+        cleaned, draft_warnings = clean_times(draft, text, other_sources)
         warnings.extend(draft_warnings)
         try:
             task = draft_to_task(cleaned, index)

@@ -84,6 +84,29 @@ def test_clean_times_keeps_time_in_sentence_even_if_missing_from_source():
     assert warnings == []
 
 
+def test_clean_times_drops_time_that_belongs_to_another_task():
+    # le 15 sono del dentista: il modello le ha attaccate anche alla palestra
+    draft = make_draft(source="palestra", title="Palestra", fixed_start="15:00")
+    text = "dentista alle 15, palestra"
+
+    cleaned, warnings = clean_times(draft, text, other_sources=["dentista alle 15"])
+
+    assert cleaned.fixed_start is None
+    assert len(warnings) == 1
+    assert "Palestra" in warnings[0]
+    assert "altro task" in warnings[0]
+
+
+def test_clean_times_keeps_time_in_own_source_even_if_another_task_has_it():
+    draft = make_draft(source="palestra prima delle 15", deadline="15:00")
+    text = "dentista alle 15, palestra prima delle 15"
+
+    cleaned, warnings = clean_times(draft, text, other_sources=["dentista alle 15"])
+
+    assert cleaned.deadline == "15:00"
+    assert warnings == []
+
+
 def test_clean_times_drops_time_not_in_sentence_with_warning():
     draft = make_draft(title="Giro in bici", earliest_start="10:30")
     text = "la visita alle 9 e mezza, poi magari un giro in bici"
@@ -255,6 +278,32 @@ def test_parse_day_reports_made_up_times_as_warnings():
     result = parse_day("magari un giro in bici", client)
 
     assert result.tasks[0].earliest_start_min is None
+    assert len(result.warnings) == 1
+
+
+def test_parse_day_drops_time_moved_to_the_wrong_task():
+    client = FakeClient(
+        [
+            llm_answer(
+                {
+                    "source": "dentista alle 15",
+                    "title": "Dentista",
+                    "duration_min": 60,
+                    "fixed_start": "15:00",
+                },
+                {
+                    "source": "palestra",
+                    "title": "Palestra",
+                    "duration_min": 60,
+                    "fixed_start": "15:00",
+                },
+            )
+        ]
+    )
+
+    result = parse_day("dentista alle 15, palestra", client)
+
+    assert [t.fixed_start_min for t in result.tasks] == [900, None]
     assert len(result.warnings) == 1
 
 
