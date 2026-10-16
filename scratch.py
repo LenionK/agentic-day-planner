@@ -1,39 +1,68 @@
-from ollama import chat
-from pydantic import BaseModel, Field
-from planner.llm.ollama_client import OllamaClient
+from typing import TypedDict
+
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
 
 
-class TaskDraft(BaseModel):
-    title: str
-    duration_min: int = Field(gt=0)
-    priority: int = Field(default=3, ge=1, le=5)
+# 1. Lo stato: tutto quello che il flusso sa
+class OrderState(TypedDict):
+    items: list[str]
+    total: float
+    status: str
 
 
-class ParsedDay(BaseModel):
-    tasks: list[TaskDraft]
+PRICES = {"pizza": 9.0, "birra": 5.0, "tiramisù": 6.0}
 
 
-SYSTEM = (
-    "Estrai i task dalla frase dell'utente. "
-    "Per ogni task: titolo breve, durata in minuti, priorità da 1 a 5. "
-    "Se la durata non è indicata, stima una durata ragionevole. "
-    "Priorità: 5 se l'utente usa 'devo', 'assolutamente', 'urgente'; "
-    "1 se usa 'se riesco', 'magari', 'se avanza tempo'; "
-    "3 in tutti gli altri casi. Non usare l'ordine dei task per decidere la priorità."
+# 2. I nodi: ricevono lo stato, restituiscono solo i campi che cambiano
+def compute_total(state: OrderState) -> dict:
+    total = sum(PRICES[item] for item in state["items"])
+    print(f"[compute_total] totale {total}")
+    return {"total": total}
+
+
+def ask_approval(state: OrderState) -> dict:
+    print("[ask_approval] eseguito")  # guarda quante volte compare alla ripresa
+    answer = interrupt(f"Il conto è {state['total']} €. Confermi?")
+    return {"status": "approvato" if answer == "sì" else "annullato"}
+
+
+def place_order(state: OrderState) -> dict:
+    if state["status"] == "annullato":
+        return {}
+    return {"status": "inviato in cucina"}
+
+
+# 3. L'arco condizionale: guarda lo stato e restituisce il nome del nodo successivo
+def needs_approval(state: OrderState) -> str:
+    return "ask_approval" if state["total"] > 20 else "place_order"
+
+
+# 4. Il grafo
+builder = StateGraph(OrderState)
+builder.add_node("compute_total", compute_total)
+builder.add_node("ask_approval", ask_approval)
+builder.add_node("place_order", place_order)
+
+builder.add_edge(START, "compute_total")
+builder.add_conditional_edges("compute_total", needs_approval)
+builder.add_edge("ask_approval", "place_order")
+builder.add_edge("place_order", END)
+
+graph = builder.compile(checkpointer=InMemorySaver())
+
+
+# 5. Esecuzione
+config = {"configurable": {"thread_id": "tavolo-7"}}
+
+result = graph.invoke(
+    {"items": ["pizza", "pizza", "birra"], "total": 0.0, "status": "nuovo"}, config
 )
 
-from planner.llm.ollama_client import OllamaClient
+if "__interrupt__" in result:
+    question = result["__interrupt__"][0].value
+    print("Il grafo chiede:", question)
+    result = graph.invoke(Command(resume="no"), config)
 
-client = OllamaClient(model="qwen2.5:7b")
-parsed = client.generate(
-    messages=[
-        {"role": "system", "content": SYSTEM},
-        {
-            "role": "user",
-            "content": "domani devo studiare 2 ore, poi palestra e se riesco la spesa",
-        },
-    ],
-    schema=ParsedDay,
-)
-for t in parsed.tasks:
-    print(t)
+print("Stato finale:", result)
