@@ -131,10 +131,11 @@ def show_confirmation(summary: dict) -> None:
     show_rejected(summary)
     show_warnings(summary)
 
-    confirm, skip = st.columns(2)
-    if confirm.button("Conferma e pianifica", type="primary"):
+    # bottoni affiancati e allineati a destra (st.columns li allargherebbe a metà pagina)
+    buttons = st.container(horizontal=True, horizontal_alignment="right")
+    if buttons.button("Conferma e pianifica", type="primary"):
         answer(diff_edits(summary["tasks"], edited.to_dict("index")), "Correzioni non valide")
-    if skip.button("Continua senza modifiche"):
+    if buttons.button("Continua senza modifiche"):
         answer({"edits": {}}, "Risposta non valida")  # ignora eventuali modifiche in tabella
 
 
@@ -160,10 +161,10 @@ def show_plan(plan: dict) -> None:
 
 def show_review(plan: dict) -> None:
     show_plan(plan)
-    accept, edit = st.columns(2)
-    if accept.button("Continua senza modifiche", type="primary"):
+    buttons = st.container(horizontal=True, horizontal_alignment="right")
+    if buttons.button("Continua senza modifiche", type="primary"):
         answer({"accept": True}, "Risposta non valida")
-    if edit.button("Modifica i task"):
+    if buttons.button("Modifica i task"):
         answer({"accept": False}, "Risposta non valida")
 
 
