@@ -1,35 +1,131 @@
 # agentic-day-planner
-local-first multi-agent day planner: LangGraph + OR-Tools CP-SAT + pgvector, 100% free stack
 
+Local-first agentic day planner: describe your day in plain language and get an optimized schedule.
+LangGraph + Ollama + OR-Tools CP-SAT, 100% free stack.
+
+## What it does
+
+You write something like *"domani devo studiare 2 ore, dentista alle 15, se riesco la spesa"*
+(*"tomorrow I have to study for 2 hours, dentist at 3pm, groceries if I can"*), and the planner:
+
+1. **Parses** the sentence with a local LLM into tasks with duration, priority, whether they are
+   required, and time constraints (fixed start, not before, deadline).
+2. **Asks you to check them** in an editable table: you can change duration, priority (1–5),
+   required, and times before anything is scheduled.
+3. **Schedules** the confirmed tasks with a constraint solver (OR-Tools CP-SAT): no overlaps,
+   time windows respected, higher priorities first, impossible tasks left out instead of
+   breaking the plan.
+4. **Shows you the plan**: accept it, or go back to the tasks, edit them and plan again.
+
+It is an *agentic workflow*: a LangGraph graph of steps with the user in the loop, not a
+multi-agent system.
 
 ## How it works
 
-You write your day in plain language, for example *"Tomorrow I have 6 hours: study 2h, gym, call the dentist, grocery shopping"*, and the system returns an optimized schedule you can export to your calendar as `.ics`.
-
 ```mermaid
 flowchart TD
-    A["Free-text input"] --> B["FastAPI"]
-    B --> C["LangGraph orchestrator"]
-    C --> D["Parser agent: LLM + Pydantic"]
-    D --> E["Memory agent: pgvector RAG"]
-    E --> F["Planner: OR-Tools CP-SAT"]
-    F --> G["Critic: plain Python checks"]
-    G -- "issues found" --> F
-    G -- "plan is valid" --> H[("PostgreSQL")]
-    H --> I[".ics export"]
+    START([start]) --> P["Parser: LLM + Pydantic"]
+    P --> C{{"Confirm tasks (interrupt)"}}
+    C --> E["Editor: validates and applies the user's edits"]
+    E --> S["Scheduler: OR-Tools CP-SAT"]
+    S --> R{{"Review plan (interrupt)"}}
+    R -- "accept" --> END([end])
+    R -- "edit again" --> C
 ```
 
-### Agents
-
-| Agent | Role | Uses LLM? |
-|-------|------|-----------|
-| **Parser** | Extracts tasks, durations, priorities and deadlines from free text into validated Pydantic models (with automatic retry) | Yes |
-| **Memory** | Retrieves user preferences and past days via embeddings and pgvector (e.g. "I study better in the morning") | Embeddings only |
-| **Planner** | Builds the schedule with OR-Tools CP-SAT, so constraints are guaranteed, not hallucinated | No |
-| **Critic** | Checks for overlaps, missing tasks and violated constraints; sends the plan back to the Planner if needed | No |
+| Step | Role | Uses LLM? |
+|------|------|-----------|
+| **Parser** | Turns the sentence into validated tasks. The LLM writes the source fragment of each task first (grounding), times are converted in Python, made-up times are removed with a warning, invalid tasks are rejected with a reason | Yes |
+| **Confirm tasks** | Pauses the graph (`interrupt`) and shows a JSON summary; the answer contains only the changed fields and is validated with a Pydantic `response_schema` | No |
+| **Editor** | Applies the edits with full validation; unknown tasks or edits that would make a task impossible are skipped with a warning | No |
+| **Scheduler** | Builds the schedule with CP-SAT: constraints are guaranteed, not hallucinated | No |
+| **Review plan** | Pauses again with the plan; a conditional edge ends the graph or loops back to the confirmation, starting from the tasks already edited | No |
 
 ### Design choices
 
-- **The solver does the hard part.** Scheduling is a constraint problem, so CP-SAT handles it and the LLM only parses text. This is why small local models (Qwen2.5 7B, Llama 3.2 3B) work well.
-- **100% free and local-first.** Ollama for the LLM, PostgreSQL + pgvector in Docker, AWS emulated with LocalStack. Groq or Gemini free tiers are optional.
-- **Model-agnostic.** A single LLM interface lets you switch models with one line in `.env`.
+- **The solver does the hard part.** Scheduling is a constraint problem, so CP-SAT handles it and
+  the LLM only does the language part. This is why a small local model (Qwen2.5 7B) is enough.
+- **The user decides, the graph applies.** The interface only collects choices; validation and
+  rules live in the graph, so any caller (web UI, future API, future agent) behaves the same.
+- **Never fail silently.** Removed times, skipped edits and rejected tasks always come with a
+  warning or a reason.
+- **100% free and local-first.** Ollama for the LLM, everything runs on your machine.
+- **Model-agnostic.** A single `LLMClient` interface (Ollama or LangChain) selected from `.env`.
+
+## Installation
+
+Requirements: Python 3.11+ (developed on 3.13) and [Ollama](https://ollama.com).
+
+```bash
+git clone <repo-url>
+cd agentic-day-planner
+
+python -m venv .venv
+# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
+
+python -m pip install -e ".[dev,ui]"
+
+ollama pull qwen2.5:7b
+cp .env.example .env    # Windows: copy .env.example .env
+```
+
+Settings (model, Ollama host, context size, temperature...) are in `.env`; the defaults work with
+a local Ollama. Docker and PostgreSQL are not needed yet: they are for the planned database and
+memory.
+
+## Usage
+
+Start Ollama, then the interface:
+
+```bash
+python -m streamlit run src/planner/ui/app.py
+```
+
+It opens at <http://localhost:8501>:
+
+1. Write your day and press **Enter** (or *Pianifica*).
+2. Check the tasks: edit the table and press *Conferma e pianifica*, or *Continua senza modifiche*.
+3. Look at the plan: *Continua senza modifiche* to accept it, *Modifica i task* to go back.
+
+On a GTX 1060 6GB the parser takes about 10–12 seconds per sentence; the solver is instant.
+The interface is in Italian, like the parser prompt.
+
+### Tests and evaluation
+
+```bash
+python -m pytest                    # unit tests, no LLM needed (fake client)
+python -m ruff check src tests
+python tests/eval/run_eval.py       # parser evaluation on real cases, needs Ollama
+```
+
+## Project structure
+
+```
+src/planner/
+  agents/   parser, state, graph, approval (summaries), editor
+  solver/   Pydantic models and CP-SAT scheduler
+  llm/      LLMClient interface, Ollama and LangChain clients, factory
+  ui/       Streamlit interface and edit diffing
+  config.py settings from .env
+tests/
+  unit/     unit and graph tests (FakeClient, InMemorySaver)
+  eval/     parser evaluation cases and script
+```
+
+## Status and roadmap
+
+Working: parser, user confirmation and edits, scheduler, plan review loop, Streamlit interface.
+
+Next:
+
+- **Critic**: detect conflicts between required tasks and let the user choose which to keep
+- **Database** (PostgreSQL) and a node that saves the accepted plan
+- **Memory** with pgvector: preferences and past days
+- **FastAPI** and `.ics` export
+- Model comparison on the same evaluation set
+
+See [TODO.md](TODO.md) for details and design decisions.
+
+## License
+
+MIT
