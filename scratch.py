@@ -46,8 +46,8 @@ builder.add_node("ask_approval", ask_approval)
 builder.add_node("place_order", place_order)
 
 builder.add_edge(START, "compute_total")
-builder.add_conditional_edges("compute_total", needs_approval)
 builder.add_edge("ask_approval", "place_order")
+builder.add_edge("ask_approval", "editor")
 builder.add_edge("place_order", END)
 
 graph = builder.compile(checkpointer=InMemorySaver())

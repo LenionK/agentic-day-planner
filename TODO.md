@@ -11,11 +11,18 @@
 - [x] Client LLM: interfaccia `LLMClient`, retry con l'errore di validazione, configurazione da `.env`, factory
 - [x] Client LangChain (`ChatOllama`), equivalente a `OllamaClient` a parità di parametri
 - [x] Parser: frase libera → lista di `Task`, con output strutturato, `source` per task, pulizia degli orari e avvisi
-- [x] Set di valutazione del Parser (13 casi) e script `run_eval.py`; risultati in `tests/eval/RESULTS.md`
+- [x] Set di valutazione del Parser (13 casi) e script `run_eval.py` (`tests/eval/RESULTS.md` non è mai stato aggiunto al repo)
+- [x] Grafo LangGraph: Parser → conferma utente (`ask_approval`) → `editor` → Scheduler
+- [x] Conferma dell'utente con `interrupt`: riepilogo JSON (orari "HH:MM", scartati con motivo, avvisi; senza `source`), risposta validata con `response_schema`
+- [x] Editor: applica le correzioni (priorità, obbligo, durata) con validazione e avvisi; checkpoint in modalità strict nei test
 
 ## Prossimi passi
-- [ ] Grafo LangGraph: Parser → conferma utente → Scheduler → Critico
-- [ ] Conferma dell'utente (interrupt): priorità, obblighi, avvisi e task scartati
+- [ ] Interfaccia Streamlit (chiamante del grafo), un passo alla volta:
+  - mostra il riepilogo (task, scartati, avvisi)
+  - campi modificabili: obbligatorio come checkbox, priorità come menu 1–5, durata come numero; costruisce `{"edits": ...}` con le sole differenze e riprende il grafo
+  - mostra l'errore se la risposta non è valida (il grafo resta in pausa) e poi il piano
+  - impostare `LANGGRAPH_STRICT_MSGPACK=true` all'avvio, come nei test
+- [ ] Correzioni degli orari (fisso, dopo le, entro le) nell'editor
 - [ ] Critico: rileva i conflitti tra obbligatori; il grafo si ferma e chiede all'utente quale tenere
 - [ ] Database: tabelle, view e stored procedure
 - [ ] Memoria con pgvector (preferenze e giornate passate)
@@ -50,7 +57,11 @@
 ## Decisioni prese
 - **Priorità:** suggerita dal Parser in base agli indizi nel testo ("devo" → 5, "se riesco" → 1, altrimenti 3); l'utente la conferma o la corregge prima di generare il piano.
 - **Obbligo e priorità sono indipendenti:** "devo" alza la priorità ma non rende un task obbligatorio. Obbligatorio solo con un'espressione esplicita ("non posso saltare") o un orario di inizio preciso.
-- **Obbligatorio ⇒ priorità 5:** lo impone il Parser in Python, non il modello.
+- **Obbligatorio ⇒ priorità 5:** lo impongono in Python il Parser e l'editor, non il modello. Non è un validator di `Task`: per lo scheduler obbligo e priorità restano indipendenti.
+- **Conferma dell'utente:** il riepilogo non mostra il `source` (serve solo al grounding del Parser). La risposta contiene solo le differenze (`{"edits": {"t2": {"priority": 2}}}`, `{"edits": {}}` = confermo tutto), non la lista completa.
+- **Editor separato da chi decide:** interfaccia e futuro agente producono lo stesso formato di correzioni; l'editor le valida e le applica. Correzione su id inesistente o che rende il task invalido: ignorata per intero, con avviso.
+- **Interfaccia:** Streamlit per ora (solo Python); FastAPI quando servirà un'API vera (`.ics`, altri client). Il grafo non cambia.
+- **Checkpoint:** `LANGGRAPH_STRICT_MSGPACK=true`; LangGraph ammette da solo i tipi dichiarati in `PlannerState`.
 - **Task obbligatori nello scheduler:** implementati con l'opzione ___ (A = vincolo rigido, B = peso dominante).
 - **Conflitto tra obbligatori:** sceglie l'utente. Il Critico rileva il conflitto e il grafo si ferma per chiedere (interrupt di LangGraph).
 - **L'LLM fa la parte linguistica, Python i calcoli:** orari come testo "HH:MM" convertiti in Python; pulizia degli orari deterministica.

@@ -37,3 +37,6 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["planner", "tests"]

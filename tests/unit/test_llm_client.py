@@ -1,5 +1,6 @@
 import pytest
 from pydantic import BaseModel, Field, ValidationError
+
 from tests.fakes import FakeClient
 
 

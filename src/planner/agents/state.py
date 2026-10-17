@@ -20,5 +20,8 @@ class PlannerState(TypedDict):
     warnings: NotRequired[list[str]]
     sources: NotRequired[dict[str, str]]
 
+    # scritto dalla conferma: la risposta dell'utente alla ripresa
+    user_response: NotRequired[dict]
+
     # scritto dallo scheduler
     schedule: NotRequired[Schedule]
