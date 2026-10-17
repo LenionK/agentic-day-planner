@@ -1,12 +1,16 @@
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from planner.agents.parser import to_minutes
 from planner.solver.models import Task
+
+TIME_FIELDS = ("fixed_start", "earliest_start", "deadline")
 
 
 class TaskEdit(BaseModel):
     """The user's correction to one task. Every field is optional: only what is set changes.
 
-    An explicit null passes here but is rejected when the Task is rebuilt.
+    Times are 'HH:MM' strings, like in the summary; null removes the time.
+    For the other fields an explicit null passes here but is rejected when the Task is rebuilt.
     """
 
     model_config = ConfigDict(extra="forbid")  # un campo scritto male è un errore, non un no-op
@@ -14,6 +18,16 @@ class TaskEdit(BaseModel):
     priority: int | None = Field(default=None, ge=1, le=5)
     required: bool | None = None
     duration_min: int | None = Field(default=None, gt=0, le=720)
+    fixed_start: str | None = None
+    earliest_start: str | None = None
+    deadline: str | None = None
+
+    @field_validator(*TIME_FIELDS)
+    @classmethod
+    def check_time_format(cls, value: str | None) -> str | None:
+        if value is not None:
+            to_minutes(value)  # ValueError -> ValidationError: il grafo resta in pausa
+        return value
 
 
 class ApprovalResponse(BaseModel):
@@ -32,11 +46,22 @@ def _short_error(err: ValidationError) -> str:
     return "; ".join(error["msg"] for error in err.errors())
 
 
+def _to_task_fields(changes: dict) -> dict:
+    """Rename the time fields to the Task ones and turn 'HH:MM' into minutes."""
+    fields = dict(changes)
+    for name in TIME_FIELDS:
+        if name in fields:
+            value = fields.pop(name)
+            fields[f"{name}_min"] = None if value is None else to_minutes(value)
+    return fields
+
+
 def apply_edits(tasks: list[Task], response: ApprovalResponse) -> tuple[list[Task], list[str]]:
     """Apply the corrections and return the new tasks plus one warning per skipped edit.
 
     The input tasks are not modified and keep their order; tasks without edits are returned as is.
     An edit for an id that does not exist is skipped with a warning.
+    Times arrive as 'HH:MM' and are converted to minutes here, for the scheduler.
     An edit that would make its task invalid (e.g. a duration longer than its time window)
     is skipped as a whole with a warning: the task stays as it was.
     A task that ends up required gets the top priority, as in the parser.
@@ -55,7 +80,7 @@ def apply_edits(tasks: list[Task], response: ApprovalResponse) -> tuple[list[Tas
             continue
 
         changes = edit.model_dump(exclude_unset=True)  # solo i campi scritti dall'utente
-        data = {**task.model_dump(), **changes}
+        data = {**task.model_dump(), **_to_task_fields(changes)}
         if data["required"]:
             data["priority"] = 5  # obbligatorio => priorità 5, come nel parser
         try:

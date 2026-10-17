@@ -27,6 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-cov", "ruff"]
+ui = ["streamlit>=1.66"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -37,6 +38,10 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+# la variabile d'ambiente va impostata prima di importare langgraph
+"src/planner/ui/app.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["planner", "tests"]

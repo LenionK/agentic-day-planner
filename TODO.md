@@ -22,7 +22,7 @@
   - campi modificabili: obbligatorio come checkbox, priorità come menu 1–5, durata come numero; costruisce `{"edits": ...}` con le sole differenze e riprende il grafo
   - mostra l'errore se la risposta non è valida (il grafo resta in pausa) e poi il piano
   - impostare `LANGGRAPH_STRICT_MSGPACK=true` all'avvio, come nei test
-- [ ] Correzioni degli orari (fisso, dopo le, entro le) nell'editor
+- [x] Correzioni degli orari (fisso, dopo le, entro le): "HH:MM" nella risposta, l'editor converte in minuti; orario vuoto = vincolo tolto
 - [ ] Critico: rileva i conflitti tra obbligatori; il grafo si ferma e chiede all'utente quale tenere
 - [ ] Database: tabelle, view e stored procedure
 - [ ] Memoria con pgvector (preferenze e giornate passate)

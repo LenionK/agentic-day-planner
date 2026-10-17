@@ -97,9 +97,42 @@ def test_task_made_required_gets_top_priority():
         {"edits": {"t1": {"priority": 6}}},
         {"edits": {"t1": {"duration_min": -30}}},
         {"edits": {"t1": {"priorty": 3}}},
+        {"edits": {"t1": {"fixed_start": "25:00"}}},
+        {"edits": {"t1": {"deadline": "alle tre"}}},
         {},
     ],
 )
 def test_invalid_response_is_rejected(payload):
     with pytest.raises(ValidationError):
         ApprovalResponse.model_validate(payload)
+
+
+def test_time_edit_is_converted_to_minutes():
+    tasks = make_tasks()
+
+    edited, warnings = apply_edits(tasks, respond({"t1": {"fixed_start": "09:45"}}))
+
+    assert edited[0].fixed_start_min == 585
+    assert warnings == []
+
+
+def test_null_time_removes_the_constraint():
+    tasks = make_tasks()
+
+    # t2 aveva la finestra 10:00-11:00: togliendo la scadenza i 90 minuti ci stanno
+    edited, warnings = apply_edits(tasks, respond({"t2": {"deadline": None, "duration_min": 90}}))
+
+    assert edited[1].deadline_min is None
+    assert edited[1].earliest_start_min == 600
+    assert edited[1].duration_min == 90
+    assert warnings == []
+
+
+def test_time_edit_that_breaks_the_window_is_skipped():
+    tasks = make_tasks()
+
+    # inizio fisso alle 10:30 con 50 minuti: finirebbe dopo la scadenza delle 11:00
+    edited, warnings = apply_edits(tasks, respond({"t2": {"fixed_start": "10:30"}}))
+
+    assert edited[1] == tasks[1]
+    assert warnings[0].startswith("t2:")
