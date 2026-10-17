@@ -16,11 +16,11 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from pydantic import ValidationError
 
-from planner.agents.approval import approval
-from planner.agents.graph import build_graph
+from planner.agents.approval import CONFIRM_TASKS, REVIEW_PLAN, approval, plan_summary
+from planner.agents.graph import all_warnings, build_graph
 from planner.config import Settings
 from planner.llm.factory import build_llm_client
-from planner.solver.models import DayConfig, fmt_time
+from planner.solver.models import DayConfig
 from planner.ui.edits import diff_edits, to_time
 
 # colonne della tabella: nomi interni (quelli del riepilogo) -> come appaiono all'utente
@@ -53,19 +53,40 @@ def graph_config() -> dict:
     return {"configurable": {"thread_id": st.session_state.thread_id}}
 
 
+def remember(result: dict) -> None:
+    """Store where the graph is: waiting for an answer (pending) or finished (final)."""
+    if "__interrupt__" in result:
+        (interrupt_,) = result["__interrupt__"]
+        st.session_state.pending = interrupt_.value
+        if interrupt_.value["step"] == CONFIRM_TASKS:
+            st.session_state.round += 1  # giro nuovo -> tabella nuova (vedi key del data_editor)
+    else:
+        st.session_state.pop("pending", None)
+        st.session_state.final = result
+
+
 def start_planning(text: str) -> None:
-    """Run the graph until the confirmation and remember where it stopped."""
+    """Run the graph until its first question."""
     st.session_state.thread_id = str(uuid.uuid4())  # una conversazione nuova per ogni frase
-    st.session_state.pop("result", None)
-    result = get_graph().invoke({"user_input": text, "day": DayConfig()}, graph_config())
-
-    (pending,) = result["__interrupt__"]
-    st.session_state.summary = pending.value
+    st.session_state.round = 0
+    st.session_state.pop("final", None)
+    remember(get_graph().invoke({"user_input": text, "day": DayConfig()}, graph_config()))
 
 
-def resume_planning(response: dict) -> None:
-    """Resume the paused graph with the user's edits; raises ValidationError if invalid."""
-    st.session_state.result = get_graph().invoke(Command(resume=response), graph_config())
+def answer(response: dict, error_prefix: str) -> None:
+    """Resume the graph with the user's answer, then show the next screen.
+
+    An invalid answer raises ValidationError inside the graph, which stays paused:
+    the error is shown and the user can try again.
+    """
+    try:
+        with st.spinner("Sto pianificando..."):
+            result = get_graph().invoke(Command(resume=response), graph_config())
+    except ValidationError as err:
+        st.error(f"{error_prefix}: {short_errors(err)}")
+        return
+    remember(result)
+    st.rerun()  # riparte lo script e mostra la schermata successiva
 
 
 def tasks_table(tasks: list[dict]) -> pd.DataFrame:
@@ -75,9 +96,12 @@ def tasks_table(tasks: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(rows).set_index("id")[list(COLUMNS)]
 
 
-def show_notes(summary: dict) -> None:
+def show_rejected(summary: dict) -> None:
     for rejected in summary["rejected"]:
         st.error(f"Scartato: {rejected['title']} ({rejected['reason']})")
+
+
+def show_warnings(summary: dict) -> None:
     for warning in summary["warnings"]:
         st.warning(warning)
 
@@ -98,50 +122,60 @@ def show_confirmation(summary: dict) -> None:
             column_config=COLUMNS,
             disabled=READ_ONLY,
             hide_index=True,
-            key=f"editor-{st.session_state.thread_id}",  # frase nuova -> tabella nuova
+            # una tabella nuova per ogni frase e per ogni giro di correzioni
+            key=f"editor-{st.session_state.thread_id}-{st.session_state.round}",
         )
     else:
         st.info("Nessun task riconosciuto nella frase.")
         edited = pd.DataFrame()
-    show_notes(summary)
+    show_rejected(summary)
+    show_warnings(summary)
 
-    if st.button("Conferma e pianifica", type="primary"):
-        response = diff_edits(summary["tasks"], edited.to_dict("index"))
-        try:
-            with st.spinner("Sto pianificando..."):
-                resume_planning(response)
-        except ValidationError as err:
-            # il grafo resta in pausa: l'utente può correggere e riprovare
-            st.error(f"Correzioni non valide: {short_errors(err)}")
-        else:
-            st.rerun()  # riparte lo script e mostra il piano
+    confirm, skip = st.columns(2)
+    if confirm.button("Conferma e pianifica", type="primary"):
+        answer(diff_edits(summary["tasks"], edited.to_dict("index")), "Correzioni non valide")
+    if skip.button("Continua senza modifiche"):
+        answer({"edits": {}}, "Risposta non valida")  # ignora eventuali modifiche in tabella
 
 
-def show_plan(result: dict) -> None:
-    schedule = result["schedule"]
-    titles = {task.id: task.title for task in result["tasks"]}
-
+def show_plan(plan: dict) -> None:
     st.subheader("Piano della giornata")
-    if schedule.status == "INFEASIBLE":
-        conflicts = ", ".join(titles[task_id] for task_id in schedule.conflicts)
+    if plan["conflicts"]:
+        conflicts = ", ".join(plan["conflicts"])
         st.error(f"Giornata impossibile: questi obbligatori non stanno insieme: {conflicts}")
-    elif schedule.scheduled:
+    elif plan["scheduled"]:
         st.dataframe(
             [
-                {"Dalle": fmt_time(s.start_min), "Alle": fmt_time(s.end_min), "Task": s.title}
-                for s in sorted(schedule.scheduled, key=lambda s: s.start_min)
+                {"Dalle": s["start"], "Alle": s["end"], "Task": s["title"]}
+                for s in plan["scheduled"]
             ],
             hide_index=True,
         )
-    if schedule.unscheduled:
-        missing = ", ".join(titles[task_id] for task_id in schedule.unscheduled)
-        st.warning(f"Non inseriti: {missing}")
+    else:
+        st.info("Nessun task nel piano.")
+    if plan["unscheduled"]:
+        st.warning(f"Non inseriti: {', '.join(plan['unscheduled'])}")
+    show_warnings(plan)
 
-    # i task dopo le correzioni dell'editor, con gli avvisi del parser e dell'editor
-    final = approval(result["tasks"], result["rejected"], result["warnings"])
+
+def show_review(plan: dict) -> None:
+    show_plan(plan)
+    accept, edit = st.columns(2)
+    if accept.button("Continua senza modifiche", type="primary"):
+        answer({"accept": True}, "Risposta non valida")
+    if edit.button("Modifica i task"):
+        answer({"accept": False}, "Risposta non valida")
+
+
+def show_final(result: dict) -> None:
+    # TODO: quando ci sarà il database, il grafo salverà il piano in un nodo dopo la revisione
+    st.success("Piano confermato.")
+    show_plan(plan_summary(result["schedule"], result["tasks"], all_warnings(result)))
+
+    tasks = approval(result["tasks"], result["rejected"], [])
     st.subheader("Task confermati")
-    st.dataframe(tasks_table(final["tasks"]), column_config=COLUMNS, hide_index=True)
-    show_notes(final)
+    st.dataframe(tasks_table(tasks["tasks"]), column_config=COLUMNS, hide_index=True)
+    show_rejected(tasks)
 
 
 st.title("Agentic day planner")
@@ -160,8 +194,12 @@ if submitted:
     else:
         st.warning("Scrivi cosa devi fare.")
 
-# fuori dagli if dei bottoni: ciò che è in session_state resta visibile a ogni esecuzione
-if "result" in st.session_state:
-    show_plan(st.session_state.result)  # conversazione conclusa: niente più modifiche
-elif "summary" in st.session_state:
-    show_confirmation(st.session_state.summary)
+# fuori dagli if dei bottoni: ciò che è in session_state resta visibile a ogni esecuzione;
+# la schermata dipende dalla domanda a cui il grafo aspetta risposta ("step")
+if "final" in st.session_state:
+    show_final(st.session_state.final)
+elif "pending" in st.session_state:
+    if st.session_state.pending["step"] == CONFIRM_TASKS:
+        show_confirmation(st.session_state.pending)
+    elif st.session_state.pending["step"] == REVIEW_PLAN:
+        show_review(st.session_state.pending)

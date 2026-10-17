@@ -15,16 +15,13 @@
 - [x] Grafo LangGraph: Parser → conferma utente (`ask_approval`) → `editor` → Scheduler
 - [x] Conferma dell'utente con `interrupt`: riepilogo JSON (orari "HH:MM", scartati con motivo, avvisi; senza `source`), risposta validata con `response_schema`
 - [x] Editor: applica le correzioni (priorità, obbligo, durata) con validazione e avvisi; checkpoint in modalità strict nei test
+- [x] Correzioni degli orari (fisso, dopo le, entro le): "HH:MM" nella risposta, l'editor converte in minuti; orario vuoto = vincolo tolto
+- [x] Interfaccia Streamlit (`src/planner/ui/app.py`): tabella modificabile (checkbox, menu 1–5, durata, selettore orari), invio con Invio, "Continua senza modifiche"
+- [x] Revisione del piano: secondo `interrupt` dopo lo scheduler e arco condizionale; "accetta" → fine, "modifica" → di nuovo la conferma dei task, già corretti
 
 ## Prossimi passi
-- [ ] Interfaccia Streamlit (chiamante del grafo), un passo alla volta:
-  - mostra il riepilogo (task, scartati, avvisi)
-  - campi modificabili: obbligatorio come checkbox, priorità come menu 1–5, durata come numero; costruisce `{"edits": ...}` con le sole differenze e riprende il grafo
-  - mostra l'errore se la risposta non è valida (il grafo resta in pausa) e poi il piano
-  - impostare `LANGGRAPH_STRICT_MSGPACK=true` all'avvio, come nei test
-- [x] Correzioni degli orari (fisso, dopo le, entro le): "HH:MM" nella risposta, l'editor converte in minuti; orario vuoto = vincolo tolto
 - [ ] Critico: rileva i conflitti tra obbligatori; il grafo si ferma e chiede all'utente quale tenere
-- [ ] Database: tabelle, view e stored procedure
+- [ ] Database: tabelle, view e stored procedure; nodo `salva_piano` dopo la revisione ("accetta" → `salva_piano` → END)
 - [ ] Memoria con pgvector (preferenze e giornate passate)
 - [ ] API FastAPI ed export `.ics`
 - [ ] Eval dei modelli (Qwen2.5 7B, Phi-4 mini, Llama 3.1 8B, Aya Expanse 8B) sulla GTX 1060
@@ -62,6 +59,9 @@
 - **Editor separato da chi decide:** interfaccia e futuro agente producono lo stesso formato di correzioni; l'editor le valida e le applica. Correzione su id inesistente o che rende il task invalido: ignorata per intero, con avviso.
 - **Interfaccia:** Streamlit per ora (solo Python); FastAPI quando servirà un'API vera (`.ics`, altri client). Il grafo non cambia.
 - **Checkpoint:** `LANGGRAPH_STRICT_MSGPACK=true`; LangGraph ammette da solo i tipi dichiarati in `PlannerState`.
+- **Domande all'utente:** ogni riepilogo passato a `interrupt` ha un campo `step` (`confirm_tasks`, `review_plan`) che dice al chiamante a quale domanda risponde; ogni domanda ha il suo `response_schema`.
+- **Avvisi tra un giro e l'altro:** quelli del Parser restano sempre; dell'editor si tengono solo quelli dell'ultimo giro (`edit_warnings`), quelli vecchi riguardano correzioni superate.
+- **Salvataggio del piano:** sarà un nodo del grafo dopo la revisione, non un'azione dell'interfaccia: ogni chiamante (Streamlit, API, agente) ottiene lo stesso comportamento rispondendo "accetta".
 - **Task obbligatori nello scheduler:** implementati con l'opzione ___ (A = vincolo rigido, B = peso dominante).
 - **Conflitto tra obbligatori:** sceglie l'utente. Il Critico rileva il conflitto e il grafo si ferma per chiedere (interrupt di LangGraph).
 - **L'LLM fa la parte linguistica, Python i calcoli:** orari come testo "HH:MM" convertiti in Python; pulizia degli orari deterministica.

@@ -5,7 +5,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from pydantic import ValidationError
 
-from planner.agents.graph import build_graph
+from planner.agents.graph import ACCEPT, EDIT, build_graph, route_after_review
 from planner.solver.models import DayConfig
 from tests.fakes import FakeClient
 
@@ -116,8 +116,9 @@ def test_graph_applies_user_edits_before_scheduling():
 
     (studio,) = final["schedule"].scheduled
     assert studio.end_min - studio.start_min == 45
-    assert len(final["warnings"]) == 1
-    assert "t9" in final["warnings"][0]
+    assert final["warnings"] == []  # avvisi del parser
+    assert len(final["edit_warnings"]) == 1
+    assert "t9" in final["edit_warnings"][0]
 
 
 def test_graph_stays_paused_on_invalid_response_and_accepts_a_retry():
@@ -131,3 +132,76 @@ def test_graph_stays_paused_on_invalid_response_and_accepts_a_retry():
 
     assert final["tasks"][0].priority == 2
     assert "schedule" in final
+
+
+def pending(result: dict) -> dict:
+    """The value of the interrupt the graph stopped at."""
+    (interrupt_,) = result["__interrupt__"]
+    return interrupt_.value
+
+
+def test_the_two_questions_are_distinguishable():
+    graph, config = paused_study_graph("domande")
+    (first_interrupt,) = graph.get_state(config).interrupts
+    first = first_interrupt.value
+
+    second = pending(graph.invoke(Command(resume={"edits": {}}), config))
+
+    assert first["step"] == "confirm_tasks"
+    assert "tasks" in first
+    assert second["step"] == "review_plan"
+    assert second["scheduled"] == [{"title": "Studio", "start": "08:00", "end": "10:00"}]
+
+
+def test_accepting_the_plan_ends_the_graph():
+    graph, config = paused_study_graph("accetta")
+    graph.invoke(Command(resume={"edits": {}}), config)
+
+    final = graph.invoke(Command(resume={"accept": True}), config)
+
+    assert "__interrupt__" not in final
+    assert graph.get_state(config).next == ()
+    assert final["plan_accepted"] is True
+    assert len(final["schedule"].scheduled) == 1
+
+
+def test_editing_again_starts_from_the_already_edited_tasks():
+    graph, config = paused_study_graph("ciclo")
+    graph.invoke(Command(resume={"edits": {"t1": {"duration_min": 45}}}), config)
+
+    # al piano l'utente sceglie di correggere ancora: si torna alla conferma dei task
+    back = pending(graph.invoke(Command(resume={"accept": False}), config))
+    assert back["step"] == "confirm_tasks"
+    assert back["tasks"][0]["duration_min"] == 45  # la correzione del primo giro è rimasta
+
+    graph.invoke(Command(resume={"edits": {"t1": {"priority": 1}}}), config)
+    final = graph.invoke(Command(resume={"accept": True}), config)
+
+    # il piano finale riflette entrambi i giri di correzioni
+    assert (final["tasks"][0].duration_min, final["tasks"][0].priority) == (45, 1)
+    (studio,) = final["schedule"].scheduled
+    assert studio.end_min - studio.start_min == 45
+
+
+def test_only_the_last_round_of_edit_warnings_is_kept():
+    graph, config = paused_study_graph("avvisi")
+    graph.invoke(Command(resume={"edits": {"t9": {"priority": 1}}}), config)
+    graph.invoke(Command(resume={"accept": False}), config)
+
+    review = pending(graph.invoke(Command(resume={"edits": {}}), config))
+
+    assert review["warnings"] == []
+
+
+def test_invalid_plan_review_keeps_the_graph_paused():
+    graph, config = paused_study_graph("revisione-errata")
+    graph.invoke(Command(resume={"edits": {}}), config)
+
+    with pytest.raises(ValidationError):
+        graph.invoke(Command(resume={"accept": "forse", "extra": 1}), config)
+    assert graph.get_state(config).next == ("review_plan",)
+
+
+@pytest.mark.parametrize(("accepted", "label"), [(True, ACCEPT), (False, EDIT)])
+def test_route_after_review(accepted, label):
+    assert route_after_review({"plan_accepted": accepted}) == label

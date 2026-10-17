@@ -23,5 +23,11 @@ class PlannerState(TypedDict):
     # scritto dalla conferma: la risposta dell'utente alla ripresa
     user_response: NotRequired[dict]
 
+    # scritto dall'editor: solo gli avvisi dell'ultimo giro di correzioni
+    edit_warnings: NotRequired[list[str]]
+
     # scritto dallo scheduler
     schedule: NotRequired[Schedule]
+
+    # scritto dalla revisione del piano: True = accettato, False = torna alle correzioni
+    plan_accepted: NotRequired[bool]
