@@ -9,6 +9,7 @@ from planner.solver.models import Schedule, Task, fmt_time
 CONFIRM_TASKS = "confirm_tasks"
 RESOLVE_CONFLICT = "resolve_conflict"
 REVIEW_PLAN = "review_plan"
+SUGGEST_ACTIVITIES = "suggest_activities"
 
 
 class TaskSummary(BaseModel):

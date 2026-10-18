@@ -21,6 +21,12 @@
 - [x] Gestione dei conflitti, con instradamento dopo lo scheduler: tutto inserito → fine; task esclusi → revisione; obbligatori in conflitto → `resolve_conflict` (solo i task in conflitto, risposta nel formato delle correzioni) → editor → scheduler
 
 ## Prossimi passi
+- [ ] **Critico della giornata** (`agents/critic.py`): valuta il piano finito e, se la giornata gli sembra troppo vuota, propone attività
+  - [x] buchi liberi calcolati in Python (fatti per il prompt e controllo delle proposte)
+  - [x] nodo `critic` con LLM (valutazione → vuota sì/no → proposte, in quest'ordine) e nodo `suggest_activities` con interrupt; proposte che non entrano in nessun buco scartate con avviso
+  - [ ] le proposte accettate diventano task e tornano allo scheduler; il Critico gira una sola volta
+  - [ ] interfaccia: scelta delle proposte (oggi solo visualizzazione e "Va bene così")
+  - [ ] valutazione del Critico su giornate di prova (piene, vuote, a metà), anche con l'ordine dei campi invertito
 - [ ] Database: tabelle, view e stored procedure; nodo `salva_piano` dopo la revisione ("accetta" → `salva_piano` → END)
 - [ ] Memoria con pgvector (preferenze e giornate passate)
 - [ ] API FastAPI ed export `.ics`
@@ -66,6 +72,9 @@
 - **Task obbligatori nello scheduler:** implementati con l'opzione ___ (A = vincolo rigido, B = peso dominante).
 - **Conflitto tra obbligatori:** sceglie l'utente. Lo scheduler trova il conflitto minimo, il grafo si ferma e mostra solo quei task; la risposta è una normale correzione (togliere l'obbligo, spostare un orario, accorciare) applicata dallo stesso editor. Non si può accettare un piano impossibile.
 - **Revisione solo se serve:** l'utente ha già confermato task e orari; se lo scheduler li inserisce tutti il grafo finisce senza altre domande. Si chiede solo se il piano differisce da quanto confermato (task esclusi o conflitto).
+- **LLM e interrupt in nodi separati:** alla ripresa un nodo riparte dall'inizio; una chiamata all'LLM nello stesso nodo dell'interrupt verrebbe rifatta.
+- **Mai `Command(resume={})`:** un dict vuoto non riprende il grafo (è letto come mappa id interrupt → risposta); ogni risposta ha almeno un campo.
+- **Critico della giornata:** decide l'LLM se la giornata è troppo vuota, ma riceve i buchi liberi già calcolati in Python e le sue proposte sono controllate contro i buchi reali.
 - **Gestione dei conflitti, non "Critico":** non ricontrolla sovrapposizioni e vincoli, che il solver garantisce già; è la scelta di percorso dopo lo scheduler più la domanda sul conflitto. Il nome "Critico" è riservato a un passo che valuta un risultato e propone miglioramenti.
 - **L'LLM fa la parte linguistica, Python i calcoli:** orari come testo "HH:MM" convertiti in Python; pulizia degli orari deterministica.
 - **Grounding:** ogni task ha un `source`, il pezzo di frase che lo riguarda, generato per primo.

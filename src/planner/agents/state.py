@@ -31,3 +31,6 @@ class PlannerState(TypedDict):
 
     # scritto dalla revisione del piano: True = accettato, False = torna alle correzioni
     plan_accepted: NotRequired[bool]
+
+    # scritto dal Critico: valutazione della giornata e proposte valide, dati JSON semplici
+    critique: NotRequired[dict]

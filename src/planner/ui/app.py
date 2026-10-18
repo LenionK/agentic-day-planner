@@ -20,9 +20,11 @@ from planner.agents.approval import (
     CONFIRM_TASKS,
     RESOLVE_CONFLICT,
     REVIEW_PLAN,
+    SUGGEST_ACTIVITIES,
     approval,
     plan_summary,
 )
+from planner.agents.critic import duration_text
 from planner.agents.graph import all_warnings, build_graph
 from planner.config import Settings
 from planner.llm.factory import build_llm_client
@@ -198,10 +200,59 @@ def show_review(plan: dict) -> None:
         answer({"accept": False}, "Risposta non valida")
 
 
+def show_critique(critique: dict) -> None:
+    """Facts first, as data computed in Python; then the critic's comment, as an opinion.
+
+    The 7B sometimes gets a detail wrong in its comment: shown this way, a mistake
+    never contradicts a number the user can see.
+    """
+    facts = st.container(horizontal=True)
+    facts.metric(
+        "Tempo occupato",
+        f"{duration_text(critique['busy_minutes'])} su {duration_text(critique['total_minutes'])}",
+        help=f"{critique['busy_percent']}% della giornata",
+        border=True,
+    )
+    longest = critique["longest_slot"]
+    facts.metric(
+        "Libero più lungo",
+        f"{longest['start']}–{longest['end']}" if longest else "nessuno",
+        border=True,
+    )
+    st.caption("Commento del Critico")
+    st.info(critique["assessment"])
+
+
+def show_suggestions(critique: dict) -> None:
+    show_plan(critique["plan"])  # il piano su cui il Critico si esprime
+    st.subheader("Il Critico")
+    show_critique(critique)
+    st.write("Attività che potresti aggiungere:")
+    st.dataframe(
+        [
+            {
+                "Attività": s["title"],
+                "Categoria": s["category"],
+                "Durata (min)": s["duration_min"],
+                "Perché": s["reason"],
+            }
+            for s in critique["suggestions"]
+        ],
+        hide_index=True,
+    )
+    show_warnings(critique)
+    # TODO passo 3: scegliere quali proposte aggiungere al piano
+    if right_aligned_buttons().button("Va bene così", type="primary"):
+        answer({"accepted": []}, "Risposta non valida")
+
+
 def show_final(result: dict) -> None:
     # TODO: quando ci sarà il database, il grafo salverà il piano in un nodo prima di END
     st.success("Piano confermato.")
     show_plan(plan_summary(result["schedule"], result["tasks"], all_warnings(result)))
+    if "critique" in result:
+        st.subheader("Il Critico")
+        show_critique(result["critique"])
 
     tasks = approval(result["tasks"], result["rejected"], [])
     st.subheader("Task confermati")
@@ -237,3 +288,5 @@ elif "pending" in st.session_state:
         show_conflict(st.session_state.pending)
     elif step == REVIEW_PLAN:
         show_review(st.session_state.pending)
+    elif step == SUGGEST_ACTIVITIES:
+        show_suggestions(st.session_state.pending)

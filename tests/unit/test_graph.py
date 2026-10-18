@@ -11,7 +11,9 @@ from planner.agents.graph import (
     DONE,
     EDIT,
     REVIEW,
+    SUGGEST,
     build_graph,
+    route_after_critic,
     route_after_review,
     route_after_schedule,
 )
@@ -21,6 +23,17 @@ from tests.fakes import FakeClient
 
 def llm_answer(*drafts: dict) -> str:
     return json.dumps({"tasks": [{"source": d["title"], **d} for d in drafts]})
+
+
+def critic_answer(*suggestions: dict) -> str:
+    """The critic's answer: with suggestions the day is too empty, without it is fine."""
+    return json.dumps(
+        {
+            "assessment": "Giornata vuota." if suggestions else "Giornata equilibrata.",
+            "too_empty": bool(suggestions),
+            "suggestions": list(suggestions),
+        }
+    )
 
 
 def test_graph_parses_and_schedules():
@@ -40,7 +53,8 @@ def test_graph_parses_and_schedules():
                     "required": True,
                     "fixed_start": "15:00",
                 },
-            )
+            ),
+            critic_answer(),
         ]
     )
     graph = build_graph(client, checkpointer=InMemorySaver())
@@ -85,7 +99,8 @@ def test_graph_keeps_parser_warnings_and_rejected_tasks():
                     "duration_min": 60,
                     "fixed_start": "25:00",
                 },
-            )
+            ),
+            critic_answer(),
         ]
     )
     graph = build_graph(client, checkpointer=InMemorySaver())
@@ -107,7 +122,10 @@ def test_graph_keeps_parser_warnings_and_rejected_tasks():
 def paused_study_graph(thread_id: str):
     """A graph stopped at the confirmation, with one 120-minute task t1."""
     client = FakeClient(
-        [llm_answer({"source": "studiare 2 ore", "title": "Studio", "duration_min": 120})]
+        [
+            llm_answer({"source": "studiare 2 ore", "title": "Studio", "duration_min": 120}),
+            critic_answer(),
+        ]
     )
     graph = build_graph(client, checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": thread_id}}
@@ -149,9 +167,13 @@ def pending(result: dict) -> dict:
     return interrupt_.value
 
 
-def paused_graph(thread_id: str, text: str, *drafts: dict):
-    """A graph stopped at the task confirmation, on a 08:00-18:00 day (600 minutes)."""
-    graph = build_graph(FakeClient([llm_answer(*drafts)]), checkpointer=InMemorySaver())
+def paused_graph(thread_id: str, text: str, *drafts: dict, critic: str | None = None):
+    """A graph stopped at the task confirmation, on a 08:00-18:00 day (600 minutes).
+
+    `critic` is the critic's answer, if the test reaches it; by default the day is fine.
+    """
+    client = FakeClient([llm_answer(*drafts), critic or critic_answer()])
+    graph = build_graph(client, checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": thread_id}}
     day = DayConfig(day_start_min=480, day_end_min=1080)
     graph.invoke({"user_input": text, "day": day}, config)
@@ -308,3 +330,84 @@ def test_route_after_schedule(plan, label):
 @pytest.mark.parametrize(("accepted", "label"), [(True, ACCEPT), (False, EDIT)])
 def test_route_after_review(accepted, label):
     assert route_after_review({"plan_accepted": accepted}) == label
+
+
+RUN = {"title": "Corsa", "category": "attività fisica", "duration_min": 45, "reason": "muoversi"}
+
+
+def test_full_plan_goes_to_the_critic_and_ends_when_the_day_is_fine():
+    graph, config = paused_study_graph("critico-ok")
+
+    final = graph.invoke(Command(resume={"edits": {}}), config)
+
+    assert "__interrupt__" not in final
+    assert final["critique"]["too_empty"] is False
+    assert final["critique"]["suggestions"] == []
+    assert final["critique"]["free_minutes"] == 480  # 600 della giornata - 120 di studio
+
+
+def test_too_empty_day_stops_with_the_suggestions():
+    graph, config = paused_graph(
+        "critico-vuota",
+        "studio",
+        {"title": "Studio", "duration_min": 60},
+        critic=critic_answer(RUN),
+    )
+
+    question = pending(graph.invoke(Command(resume={"edits": {}}), config))
+
+    assert question["step"] == "suggest_activities"
+    assert question["assessment"] == "Giornata vuota."
+    assert [s["title"] for s in question["suggestions"]] == ["Corsa"]
+    # il piano commentato arriva insieme alla critica, per mostrarlo all'utente
+    assert question["plan"]["scheduled"] == [{"title": "Studio", "start": "08:00", "end": "09:00"}]
+    assert graph.get_state(config).next == ("suggest_activities",)
+
+
+def test_critic_runs_after_the_review_is_accepted():
+    graph, config = paused_graph(
+        "critico-dopo-revisione",
+        "studio e progetto",
+        {"title": "Studio", "duration_min": 120},
+        {"title": "Progetto", "duration_min": 540, "priority": 1},
+        critic=critic_answer(RUN),
+    )
+    graph.invoke(Command(resume={"edits": {}}), config)
+
+    question = pending(graph.invoke(Command(resume={"accept": True}), config))
+
+    assert question["step"] == "suggest_activities"
+
+
+def test_critic_is_not_called_again_when_resuming_the_suggestions():
+    client = FakeClient([llm_answer({"title": "Studio", "duration_min": 60}), critic_answer(RUN)])
+    graph = build_graph(client, checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "una-chiamata"}}
+    day = DayConfig(day_start_min=480, day_end_min=1080)
+    graph.invoke({"user_input": "studio", "day": day}, config)
+    graph.invoke(Command(resume={"edits": {}}), config)
+
+    final = graph.invoke(Command(resume={"accepted": []}), config)
+
+    assert "__interrupt__" not in final  # il grafo è davvero ripartito ed è finito
+    assert graph.get_state(config).next == ()
+    assert len(client.calls) == 2  # parser + critico, nessuna chiamata rifatta alla ripresa
+
+
+def test_invalid_answer_to_the_suggestions_keeps_the_graph_paused():
+    graph, config = paused_graph(
+        "proposte-errate",
+        "studio",
+        {"title": "Studio", "duration_min": 60},
+        critic=critic_answer(RUN),
+    )
+    graph.invoke(Command(resume={"edits": {}}), config)
+
+    with pytest.raises(ValidationError):
+        graph.invoke(Command(resume={"accepted": "tutte"}), config)
+    assert graph.get_state(config).next == ("suggest_activities",)
+
+
+@pytest.mark.parametrize(("suggestions", "label"), [([], DONE), ([RUN], SUGGEST)])
+def test_route_after_critic(suggestions, label):
+    assert route_after_critic({"critique": {"suggestions": suggestions}}) == label

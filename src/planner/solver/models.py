@@ -17,7 +17,7 @@ class Period(str, Enum):
 
 
 class Interval(BaseModel):
-    """Fascia oraria non disponibile (pranzo, impegni fissi...)."""
+    """Fascia oraria [start_min, end_min): blocchi non disponibili o tempo libero del piano."""
 
     start_min: int = Field(ge=0, le=1440)
     end_min: int = Field(ge=0, le=1440)
