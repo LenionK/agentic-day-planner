@@ -1,14 +1,22 @@
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from planner.agents.approval import PlanReviewResponse, approval, plan_summary
+from planner.agents.approval import (
+    PlanReviewResponse,
+    approval,
+    conflict_summary,
+    plan_summary,
+)
 from planner.agents.editor import ApprovalResponse, apply_edits
 from planner.agents.parser import parse_day
 from planner.agents.state import PlannerState
 from planner.llm.base import LLMClient
 from planner.solver.cpsat_scheduler import schedule
 
-# etichette restituite da route_after_review, collegate ai nodi nella mappa dell'arco
+# etichette delle funzioni di instradamento, collegate ai nodi nelle mappe degli archi
+DONE = "done"
+REVIEW = "review"
+CONFLICT = "conflict"
 ACCEPT = "accept"
 EDIT = "edit"
 
@@ -16,6 +24,20 @@ EDIT = "edit"
 def all_warnings(state: PlannerState) -> list[str]:
     """Parser warnings plus the ones of the last round of edits (older rounds are outdated)."""
     return state["warnings"] + state.get("edit_warnings", [])
+
+
+def route_after_schedule(state: PlannerState) -> str:
+    """Choose where to go after the scheduler, from the solver's result alone.
+
+    The user already confirmed the tasks, so a plan with all of them needs no question:
+    ask only when the plan differs from what was confirmed.
+    """
+    plan = state["schedule"]
+    if plan.conflicts:
+        return CONFLICT  # obbligatori incompatibili: va risolto, non si può accettare
+    if plan.unscheduled:
+        return REVIEW  # qualche task non entra: l'utente deve saperlo e decidere
+    return DONE
 
 
 def route_after_review(state: PlannerState) -> str:
@@ -26,11 +48,13 @@ def route_after_review(state: PlannerState) -> str:
 def build_graph(client: LLMClient, checkpointer=None):
     """Build the planner graph.
 
-    START -> parser -> ask_approval -> editor -> scheduler -> review_plan
-    review_plan -> END (plan accepted) or back to ask_approval (more edits).
+    START -> parser -> ask_approval -> editor -> scheduler, then from the solver's result:
+    - all tasks scheduled -> END
+    - some tasks left out -> review_plan -> END (accepted) or back to ask_approval
+    - required tasks in conflict -> resolve_conflict -> editor -> scheduler again
 
-    ask_approval and review_plan pause the graph until the user answers; the graph needs
-    a checkpointer to resume. Each loop starts from the tasks already edited.
+    ask_approval, resolve_conflict and review_plan pause the graph until the user answers;
+    the graph needs a checkpointer to resume. Each loop starts from the tasks already edited.
 
     The LLM client is injected here and reaches the parser node through a closure,
     so it never enters the state (which must stay serializable).
@@ -63,6 +87,13 @@ def build_graph(client: LLMClient, checkpointer=None):
     def scheduler_node(state: PlannerState) -> dict:
         return {"schedule": schedule(state["tasks"], state["day"])}
 
+    def resolve_conflict(state: PlannerState) -> dict:
+        summary = conflict_summary(state["schedule"], state["tasks"], all_warnings(state))
+        # stesso formato e stesso campo della conferma: l'editor applica la risposta
+        # senza sapere da quale domanda arriva
+        answer = interrupt(summary, response_schema=ApprovalResponse)
+        return {"user_response": answer.model_dump(exclude_unset=True)}
+
     def review_plan(state: PlannerState) -> dict:
         summary = plan_summary(state["schedule"], state["tasks"], all_warnings(state))
         answer = interrupt(summary, response_schema=PlanReviewResponse)
@@ -73,14 +104,20 @@ def build_graph(client: LLMClient, checkpointer=None):
     builder.add_node("ask_approval", ask_approval)
     builder.add_node("editor", editor_node)
     builder.add_node("scheduler", scheduler_node)
+    builder.add_node("resolve_conflict", resolve_conflict)
     builder.add_node("review_plan", review_plan)
 
     builder.add_edge(START, "parser")
     builder.add_edge("parser", "ask_approval")
     builder.add_edge("ask_approval", "editor")
     builder.add_edge("editor", "scheduler")
-    builder.add_edge("scheduler", "review_plan")
-    # mappa esplicita: LangGraph conosce in anticipo le destinazioni e le controlla
+    # mappe esplicite: LangGraph conosce in anticipo le destinazioni e le controlla
+    builder.add_conditional_edges(
+        "scheduler",
+        route_after_schedule,
+        {DONE: END, REVIEW: "review_plan", CONFLICT: "resolve_conflict"},
+    )
+    builder.add_edge("resolve_conflict", "editor")
     builder.add_conditional_edges(
         "review_plan", route_after_review, {ACCEPT: END, EDIT: "ask_approval"}
     )

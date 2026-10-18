@@ -1,6 +1,6 @@
 import json
 
-from planner.agents.approval import approval, plan_summary
+from planner.agents.approval import approval, conflict_summary, plan_summary
 from planner.agents.parser import RejectedTask, TaskDraft
 from planner.solver.models import Schedule, ScheduledTask, Task
 
@@ -85,4 +85,22 @@ def test_plan_summary_sorts_by_time_and_shows_titles_not_ids():
         "conflicts": ["Cena"],
         "warnings": ["un avviso"],
     }
+    assert json.loads(json.dumps(summary)) == summary
+
+
+def test_conflict_summary_keeps_only_the_conflicting_tasks():
+    tasks = [
+        Task(id="t1", title="Dentista", duration_min=60, required=True, fixed_start_min=900),
+        Task(id="t2", title="Spesa", duration_min=30),
+        Task(id="t3", title="Riunione", duration_min=60, required=True, fixed_start_min=900),
+    ]
+    plan = Schedule(status="INFEASIBLE", unscheduled=["t1", "t2", "t3"], conflicts=["t1", "t3"])
+
+    summary = conflict_summary(plan, tasks, [])
+
+    assert summary["step"] == "resolve_conflict"
+    assert [(t["id"], t["title"], t["fixed_start"]) for t in summary["tasks"]] == [
+        ("t1", "Dentista", "15:00"),
+        ("t3", "Riunione", "15:00"),
+    ]
     assert json.loads(json.dumps(summary)) == summary

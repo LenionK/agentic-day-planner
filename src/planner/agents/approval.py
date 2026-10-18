@@ -7,6 +7,7 @@ from planner.solver.models import Schedule, Task, fmt_time
 
 # il campo "step" di ogni riepilogo dice al chiamante a quale domanda sta rispondendo
 CONFIRM_TASKS = "confirm_tasks"
+RESOLVE_CONFLICT = "resolve_conflict"
 REVIEW_PLAN = "review_plan"
 
 
@@ -39,6 +40,19 @@ def _optional_time(minutes: int | None) -> str | None:
     return None if minutes is None else fmt_time(minutes)
 
 
+def _task_summary(t: Task) -> TaskSummary:
+    return TaskSummary(
+        id=t.id,
+        title=t.title,
+        duration_min=t.duration_min,
+        priority=t.priority,
+        required=t.required,
+        fixed_start=_optional_time(t.fixed_start_min),
+        earliest_start=_optional_time(t.earliest_start_min),
+        deadline=_optional_time(t.deadline_min),
+    )
+
+
 def approval(tasks: list[Task], rejected: list[RejectedTask], warnings: list[str]) -> dict:
     """Build the summary the user reviews before scheduling, as plain JSON data.
 
@@ -47,18 +61,7 @@ def approval(tasks: list[Task], rejected: list[RejectedTask], warnings: list[str
     """
     task_summaries = []
     for t in tasks:
-        task_summaries.append(
-            TaskSummary(
-                id=t.id,
-                title=t.title,
-                duration_min=t.duration_min,
-                priority=t.priority,
-                required=t.required,
-                fixed_start=_optional_time(t.fixed_start_min),
-                earliest_start=_optional_time(t.earliest_start_min),
-                deadline=_optional_time(t.deadline_min),
-            )
-        )
+        task_summaries.append(_task_summary(t))
 
     rejected_summaries = []
     for r in rejected:
@@ -109,6 +112,27 @@ def plan_summary(plan: Schedule, tasks: list[Task], warnings: list[str]) -> dict
         scheduled=scheduled,
         unscheduled=[titles[task_id] for task_id in plan.unscheduled],
         conflicts=[titles[task_id] for task_id in plan.conflicts],
+        warnings=warnings,
+    )
+    return summary.model_dump(mode="json")
+
+
+class ConflictSummary(BaseModel):
+    """The required tasks that make the day impossible, in the same format as the confirmation.
+
+    The answer uses the same edit format, so the editor applies it like any other correction.
+    """
+
+    step: Literal["resolve_conflict"] = RESOLVE_CONFLICT
+    tasks: list[TaskSummary]
+    warnings: list[str]
+
+
+def conflict_summary(plan: Schedule, tasks: list[Task], warnings: list[str]) -> dict:
+    """Build the question about a conflict: only the conflicting tasks, as plain JSON data."""
+    conflicting = set(plan.conflicts)
+    summary = ConflictSummary(
+        tasks=[_task_summary(t) for t in tasks if t.id in conflicting],
         warnings=warnings,
     )
     return summary.model_dump(mode="json")

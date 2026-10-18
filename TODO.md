@@ -18,9 +18,9 @@
 - [x] Correzioni degli orari (fisso, dopo le, entro le): "HH:MM" nella risposta, l'editor converte in minuti; orario vuoto = vincolo tolto
 - [x] Interfaccia Streamlit (`src/planner/ui/app.py`): tabella modificabile (checkbox, menu 1–5, durata, selettore orari), invio con Invio, "Continua senza modifiche"
 - [x] Revisione del piano: secondo `interrupt` dopo lo scheduler e arco condizionale; "accetta" → fine, "modifica" → di nuovo la conferma dei task, già corretti
+- [x] Gestione dei conflitti, con instradamento dopo lo scheduler: tutto inserito → fine; task esclusi → revisione; obbligatori in conflitto → `resolve_conflict` (solo i task in conflitto, risposta nel formato delle correzioni) → editor → scheduler
 
 ## Prossimi passi
-- [ ] Critico: rileva i conflitti tra obbligatori; il grafo si ferma e chiede all'utente quale tenere
 - [ ] Database: tabelle, view e stored procedure; nodo `salva_piano` dopo la revisione ("accetta" → `salva_piano` → END)
 - [ ] Memoria con pgvector (preferenze e giornate passate)
 - [ ] API FastAPI ed export `.ics`
@@ -28,6 +28,7 @@
 - [ ] CI con GitHub Actions, AWS con LocalStack e CDK
 
 ## Estensioni
+- [ ] **Critico del parser:** controlli deterministici di ogni task rispetto al suo `source` ("13 ore" → 780 minuti, "se riesco" → priorità 1, "devo" → 5), con avvisi nella conferma; misurato con `run_eval.py` prima e dopo.
 - [ ] **Agente che modifica il piano a conversazione** ("sposta la palestra alle 19", "togli la spesa", "aggiungi mezz'ora di pausa dopo pranzo"). L'LLM sceglie quale tool usare:
   - aggiungi un task
   - togli un task
@@ -59,11 +60,13 @@
 - **Editor separato da chi decide:** interfaccia e futuro agente producono lo stesso formato di correzioni; l'editor le valida e le applica. Correzione su id inesistente o che rende il task invalido: ignorata per intero, con avviso.
 - **Interfaccia:** Streamlit per ora (solo Python); FastAPI quando servirà un'API vera (`.ics`, altri client). Il grafo non cambia.
 - **Checkpoint:** `LANGGRAPH_STRICT_MSGPACK=true`; LangGraph ammette da solo i tipi dichiarati in `PlannerState`.
-- **Domande all'utente:** ogni riepilogo passato a `interrupt` ha un campo `step` (`confirm_tasks`, `review_plan`) che dice al chiamante a quale domanda risponde; ogni domanda ha il suo `response_schema`.
+- **Domande all'utente:** ogni riepilogo passato a `interrupt` ha un campo `step` (`confirm_tasks`, `resolve_conflict`, `review_plan`) che dice al chiamante a quale domanda risponde; ogni domanda ha il suo `response_schema`.
 - **Avvisi tra un giro e l'altro:** quelli del Parser restano sempre; dell'editor si tengono solo quelli dell'ultimo giro (`edit_warnings`), quelli vecchi riguardano correzioni superate.
-- **Salvataggio del piano:** sarà un nodo del grafo dopo la revisione, non un'azione dell'interfaccia: ogni chiamante (Streamlit, API, agente) ottiene lo stesso comportamento rispondendo "accetta".
+- **Salvataggio del piano:** sarà un nodo del grafo prima di END (piano completo o accettato), non un'azione dell'interfaccia: ogni chiamante (Streamlit, API, agente) ottiene lo stesso comportamento rispondendo "accetta".
 - **Task obbligatori nello scheduler:** implementati con l'opzione ___ (A = vincolo rigido, B = peso dominante).
-- **Conflitto tra obbligatori:** sceglie l'utente. Il Critico rileva il conflitto e il grafo si ferma per chiedere (interrupt di LangGraph).
+- **Conflitto tra obbligatori:** sceglie l'utente. Lo scheduler trova il conflitto minimo, il grafo si ferma e mostra solo quei task; la risposta è una normale correzione (togliere l'obbligo, spostare un orario, accorciare) applicata dallo stesso editor. Non si può accettare un piano impossibile.
+- **Revisione solo se serve:** l'utente ha già confermato task e orari; se lo scheduler li inserisce tutti il grafo finisce senza altre domande. Si chiede solo se il piano differisce da quanto confermato (task esclusi o conflitto).
+- **Gestione dei conflitti, non "Critico":** non ricontrolla sovrapposizioni e vincoli, che il solver garantisce già; è la scelta di percorso dopo lo scheduler più la domanda sul conflitto. Il nome "Critico" è riservato a un passo che valuta un risultato e propone miglioramenti.
 - **L'LLM fa la parte linguistica, Python i calcoli:** orari come testo "HH:MM" convertiti in Python; pulizia degli orari deterministica.
 - **Grounding:** ogni task ha un `source`, il pezzo di frase che lo riguarda, generato per primo.
 - **Orari inventati:** tolti solo se non compaiono nella frase, e sempre con un avviso, mai in silenzio.

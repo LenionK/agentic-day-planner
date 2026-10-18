@@ -16,7 +16,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from pydantic import ValidationError
 
-from planner.agents.approval import CONFIRM_TASKS, REVIEW_PLAN, approval, plan_summary
+from planner.agents.approval import (
+    CONFIRM_TASKS,
+    RESOLVE_CONFLICT,
+    REVIEW_PLAN,
+    approval,
+    plan_summary,
+)
 from planner.agents.graph import all_warnings, build_graph
 from planner.config import Settings
 from planner.llm.factory import build_llm_client
@@ -58,7 +64,7 @@ def remember(result: dict) -> None:
     if "__interrupt__" in result:
         (interrupt_,) = result["__interrupt__"]
         st.session_state.pending = interrupt_.value
-        if interrupt_.value["step"] == CONFIRM_TASKS:
+        if interrupt_.value["step"] in (CONFIRM_TASKS, RESOLVE_CONFLICT):
             st.session_state.round += 1  # giro nuovo -> tabella nuova (vedi key del data_editor)
     else:
         st.session_state.pop("pending", None)
@@ -110,6 +116,23 @@ def short_errors(err: ValidationError) -> str:
     return "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in err.errors())
 
 
+def edit_table(tasks: list[dict]) -> pd.DataFrame:
+    """Editable task table; returns the table with the user's changes."""
+    return st.data_editor(
+        tasks_table(tasks),
+        column_config=COLUMNS,
+        disabled=READ_ONLY,
+        hide_index=True,
+        # una tabella nuova per ogni frase e per ogni giro di correzioni
+        key=f"editor-{st.session_state.thread_id}-{st.session_state.round}",
+    )
+
+
+def right_aligned_buttons():
+    # bottoni affiancati e allineati a destra (st.columns li allargherebbe a metà pagina)
+    return st.container(horizontal=True, horizontal_alignment="right")
+
+
 def show_confirmation(summary: dict) -> None:
     st.subheader("Controlla i task")
     if summary["tasks"]:
@@ -117,34 +140,37 @@ def show_confirmation(summary: dict) -> None:
             "Puoi cambiare durata, priorità, obbligo e orari prima di pianificare. "
             "Svuota un orario per togliere il vincolo."
         )
-        edited = st.data_editor(
-            tasks_table(summary["tasks"]),
-            column_config=COLUMNS,
-            disabled=READ_ONLY,
-            hide_index=True,
-            # una tabella nuova per ogni frase e per ogni giro di correzioni
-            key=f"editor-{st.session_state.thread_id}-{st.session_state.round}",
-        )
+        edited = edit_table(summary["tasks"])
     else:
         st.info("Nessun task riconosciuto nella frase.")
         edited = pd.DataFrame()
     show_rejected(summary)
     show_warnings(summary)
 
-    # bottoni affiancati e allineati a destra (st.columns li allargherebbe a metà pagina)
-    buttons = st.container(horizontal=True, horizontal_alignment="right")
+    buttons = right_aligned_buttons()
     if buttons.button("Conferma e pianifica", type="primary"):
         answer(diff_edits(summary["tasks"], edited.to_dict("index")), "Correzioni non valide")
     if buttons.button("Continua senza modifiche"):
         answer({"edits": {}}, "Risposta non valida")  # ignora eventuali modifiche in tabella
 
 
+def show_conflict(summary: dict) -> None:
+    st.subheader("Giornata impossibile")
+    st.error(
+        "Questi task obbligatori non possono stare tutti nella giornata. "
+        "Togli l'obbligo a uno di loro, oppure cambia un orario o una durata."
+    )
+    edited = edit_table(summary["tasks"])
+    show_warnings(summary)
+
+    # niente "continua senza modifiche": un piano impossibile non si può accettare
+    if right_aligned_buttons().button("Riprova a pianificare", type="primary"):
+        answer(diff_edits(summary["tasks"], edited.to_dict("index")), "Correzioni non valide")
+
+
 def show_plan(plan: dict) -> None:
     st.subheader("Piano della giornata")
-    if plan["conflicts"]:
-        conflicts = ", ".join(plan["conflicts"])
-        st.error(f"Giornata impossibile: questi obbligatori non stanno insieme: {conflicts}")
-    elif plan["scheduled"]:
+    if plan["scheduled"]:
         st.dataframe(
             [
                 {"Dalle": s["start"], "Alle": s["end"], "Task": s["title"]}
@@ -160,8 +186,12 @@ def show_plan(plan: dict) -> None:
 
 
 def show_review(plan: dict) -> None:
+    # si arriva qui solo se qualche task non entra: è il motivo della domanda
     show_plan(plan)
-    buttons = st.container(horizontal=True, horizontal_alignment="right")
+    missing = plan["unscheduled"]
+    verb = "non entra" if len(missing) == 1 else "non entrano"
+    st.write(f"**{', '.join(missing)}** {verb} nella giornata. Ti va bene così?")
+    buttons = right_aligned_buttons()
     if buttons.button("Continua senza modifiche", type="primary"):
         answer({"accept": True}, "Risposta non valida")
     if buttons.button("Modifica i task"):
@@ -169,7 +199,7 @@ def show_review(plan: dict) -> None:
 
 
 def show_final(result: dict) -> None:
-    # TODO: quando ci sarà il database, il grafo salverà il piano in un nodo dopo la revisione
+    # TODO: quando ci sarà il database, il grafo salverà il piano in un nodo prima di END
     st.success("Piano confermato.")
     show_plan(plan_summary(result["schedule"], result["tasks"], all_warnings(result)))
 
@@ -200,7 +230,10 @@ if submitted:
 if "final" in st.session_state:
     show_final(st.session_state.final)
 elif "pending" in st.session_state:
-    if st.session_state.pending["step"] == CONFIRM_TASKS:
+    step = st.session_state.pending["step"]
+    if step == CONFIRM_TASKS:
         show_confirmation(st.session_state.pending)
-    elif st.session_state.pending["step"] == REVIEW_PLAN:
+    elif step == RESOLVE_CONFLICT:
+        show_conflict(st.session_state.pending)
+    elif step == REVIEW_PLAN:
         show_review(st.session_state.pending)

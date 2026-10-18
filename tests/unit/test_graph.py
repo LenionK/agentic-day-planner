@@ -5,8 +5,17 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from pydantic import ValidationError
 
-from planner.agents.graph import ACCEPT, EDIT, build_graph, route_after_review
-from planner.solver.models import DayConfig
+from planner.agents.graph import (
+    ACCEPT,
+    CONFLICT,
+    DONE,
+    EDIT,
+    REVIEW,
+    build_graph,
+    route_after_review,
+    route_after_schedule,
+)
+from planner.solver.models import DayConfig, Schedule
 from tests.fakes import FakeClient
 
 
@@ -140,21 +149,58 @@ def pending(result: dict) -> dict:
     return interrupt_.value
 
 
-def test_the_two_questions_are_distinguishable():
-    graph, config = paused_study_graph("domande")
-    (first_interrupt,) = graph.get_state(config).interrupts
-    first = first_interrupt.value
+def paused_graph(thread_id: str, text: str, *drafts: dict):
+    """A graph stopped at the task confirmation, on a 08:00-18:00 day (600 minutes)."""
+    graph = build_graph(FakeClient([llm_answer(*drafts)]), checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": thread_id}}
+    day = DayConfig(day_start_min=480, day_end_min=1080)
+    graph.invoke({"user_input": text, "day": day}, config)
+    return graph, config
 
-    second = pending(graph.invoke(Command(resume={"edits": {}}), config))
 
-    assert first["step"] == "confirm_tasks"
-    assert "tasks" in first
-    assert second["step"] == "review_plan"
-    assert second["scheduled"] == [{"title": "Studio", "start": "08:00", "end": "10:00"}]
+def paused_crowded_graph(thread_id: str):
+    """Studio (120 min, priority 3) and Progetto (540 min, priority 1) don't fit together."""
+    return paused_graph(
+        thread_id,
+        "studio e progetto",
+        {"title": "Studio", "duration_min": 120},
+        {"title": "Progetto", "duration_min": 540, "priority": 1},
+    )
+
+
+def paused_conflict_graph(thread_id: str):
+    """Two required tasks both at 15:00, plus a normal one."""
+    return paused_graph(
+        thread_id,
+        "dentista alle 15, riunione alle 15, spesa",
+        {"title": "Dentista", "duration_min": 60, "required": True, "fixed_start": "15:00"},
+        {"title": "Riunione", "duration_min": 60, "required": True, "fixed_start": "15:00"},
+        {"title": "Spesa", "duration_min": 30},
+    )
+
+
+def test_plan_with_all_tasks_ends_without_more_questions():
+    graph, config = paused_study_graph("tutto-inserito")
+
+    final = graph.invoke(Command(resume={"edits": {}}), config)
+
+    assert "__interrupt__" not in final
+    assert graph.get_state(config).next == ()
+    assert [item.title for item in final["schedule"].scheduled] == ["Studio"]
+
+
+def test_plan_with_tasks_left_out_asks_for_review():
+    graph, config = paused_crowded_graph("esclusi")
+
+    review = pending(graph.invoke(Command(resume={"edits": {}}), config))
+
+    assert review["step"] == "review_plan"
+    assert review["unscheduled"] == ["Progetto"]
+    assert review["scheduled"] == [{"title": "Studio", "start": "08:00", "end": "10:00"}]
 
 
 def test_accepting_the_plan_ends_the_graph():
-    graph, config = paused_study_graph("accetta")
+    graph, config = paused_crowded_graph("accetta")
     graph.invoke(Command(resume={"edits": {}}), config)
 
     final = graph.invoke(Command(resume={"accept": True}), config)
@@ -162,29 +208,28 @@ def test_accepting_the_plan_ends_the_graph():
     assert "__interrupt__" not in final
     assert graph.get_state(config).next == ()
     assert final["plan_accepted"] is True
-    assert len(final["schedule"].scheduled) == 1
+    assert final["schedule"].unscheduled == ["t2"]
 
 
 def test_editing_again_starts_from_the_already_edited_tasks():
-    graph, config = paused_study_graph("ciclo")
-    graph.invoke(Command(resume={"edits": {"t1": {"duration_min": 45}}}), config)
+    graph, config = paused_crowded_graph("ciclo")
+    graph.invoke(Command(resume={"edits": {"t1": {"priority": 4}}}), config)
 
-    # al piano l'utente sceglie di correggere ancora: si torna alla conferma dei task
+    # Progetto resta fuori: l'utente sceglie di correggere ancora
     back = pending(graph.invoke(Command(resume={"accept": False}), config))
     assert back["step"] == "confirm_tasks"
-    assert back["tasks"][0]["duration_min"] == 45  # la correzione del primo giro è rimasta
+    assert back["tasks"][0]["priority"] == 4  # la correzione del primo giro è rimasta
 
-    graph.invoke(Command(resume={"edits": {"t1": {"priority": 1}}}), config)
-    final = graph.invoke(Command(resume={"accept": True}), config)
+    # accorciato, Progetto entra: piano completo, il grafo finisce da solo
+    final = graph.invoke(Command(resume={"edits": {"t2": {"duration_min": 60}}}), config)
 
-    # il piano finale riflette entrambi i giri di correzioni
-    assert (final["tasks"][0].duration_min, final["tasks"][0].priority) == (45, 1)
-    (studio,) = final["schedule"].scheduled
-    assert studio.end_min - studio.start_min == 45
+    assert "__interrupt__" not in final
+    assert (final["tasks"][0].priority, final["tasks"][1].duration_min) == (4, 60)
+    assert final["schedule"].unscheduled == []
 
 
 def test_only_the_last_round_of_edit_warnings_is_kept():
-    graph, config = paused_study_graph("avvisi")
+    graph, config = paused_crowded_graph("avvisi")
     graph.invoke(Command(resume={"edits": {"t9": {"priority": 1}}}), config)
     graph.invoke(Command(resume={"accept": False}), config)
 
@@ -194,12 +239,70 @@ def test_only_the_last_round_of_edit_warnings_is_kept():
 
 
 def test_invalid_plan_review_keeps_the_graph_paused():
-    graph, config = paused_study_graph("revisione-errata")
+    graph, config = paused_crowded_graph("revisione-errata")
     graph.invoke(Command(resume={"edits": {}}), config)
 
     with pytest.raises(ValidationError):
         graph.invoke(Command(resume={"accept": "forse", "extra": 1}), config)
     assert graph.get_state(config).next == ("review_plan",)
+
+
+def test_conflict_asks_only_about_the_conflicting_tasks():
+    graph, config = paused_conflict_graph("conflitto")
+
+    question = pending(graph.invoke(Command(resume={"edits": {}}), config))
+
+    assert question["step"] == "resolve_conflict"
+    assert [(t["id"], t["fixed_start"]) for t in question["tasks"]] == [
+        ("t1", "15:00"),
+        ("t2", "15:00"),
+    ]
+
+
+def test_resolving_the_conflict_goes_back_to_the_scheduler():
+    graph, config = paused_conflict_graph("risolto")
+    graph.invoke(Command(resume={"edits": {}}), config)
+
+    # la riunione si sposta alle 17: tutti i task entrano e il grafo finisce
+    final = graph.invoke(Command(resume={"edits": {"t2": {"fixed_start": "17:00"}}}), config)
+
+    assert "__interrupt__" not in final
+    plan = {item.title: item.start_min for item in final["schedule"].scheduled}
+    assert (plan["Dentista"], plan["Riunione"]) == (900, 1020)
+    assert "Spesa" in plan
+
+
+def test_making_a_conflicting_task_optional_leads_to_review():
+    graph, config = paused_conflict_graph("non-obbligatoria")
+    graph.invoke(Command(resume={"edits": {}}), config)
+
+    # non più obbligatoria ma sempre alle 15: non entra, e l'utente lo deve sapere
+    review = pending(graph.invoke(Command(resume={"edits": {"t2": {"required": False}}}), config))
+
+    assert review["step"] == "review_plan"
+    assert review["unscheduled"] == ["Riunione"]
+
+
+def test_unresolved_conflict_asks_again():
+    graph, config = paused_conflict_graph("non-risolto")
+    graph.invoke(Command(resume={"edits": {}}), config)
+
+    again = pending(graph.invoke(Command(resume={"edits": {}}), config))
+
+    assert again["step"] == "resolve_conflict"
+    assert graph.get_state(config).next == ("resolve_conflict",)
+
+
+@pytest.mark.parametrize(
+    ("plan", "label"),
+    [
+        (Schedule(status="OPTIMAL", unscheduled=[]), DONE),
+        (Schedule(status="OPTIMAL", unscheduled=["t2"]), REVIEW),
+        (Schedule(status="INFEASIBLE", unscheduled=["t1", "t2"], conflicts=["t1", "t2"]), CONFLICT),
+    ],
+)
+def test_route_after_schedule(plan, label):
+    assert route_after_schedule({"schedule": plan}) == label
 
 
 @pytest.mark.parametrize(("accepted", "label"), [(True, ACCEPT), (False, EDIT)])
