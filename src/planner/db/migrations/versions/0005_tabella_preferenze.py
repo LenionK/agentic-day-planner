@@ -21,25 +21,22 @@ def upgrade() -> None:
     """Enable pgvector and create the preferences table.
 
     No foreign key to days: a preference outlives the day it came from, so the purge
-    of old days does not touch it. Two vectors per preference, because vectors made with
-    different nomic-embed-text prefixes cannot be compared:
-    - embedding (search_document): found by the tasks of a new day
-    - cluster_embedding (clustering): compared with new preferences to spot duplicates
-    768 must match EMBED_DIM in planner.llm.embedder.
+    of old days does not touch it. One vector per preference, embedded as a document:
+    new preferences (duplicates) and the tasks of a new day (retrieval) search it as
+    queries. 768 must match EMBED_DIM in planner.llm.embedder.
     """
     # l'estensione è installata nell'immagine pgvector/pgvector, va solo attivata nel database
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.execute(
         """
         CREATE TABLE preferences (
-            id                integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            text              text        NOT NULL,
-            source            text        NOT NULL,   -- il pezzo di frase da cui è nata
-            embedding         vector(768) NOT NULL,
-            cluster_embedding vector(768) NOT NULL,
-            times_seen        integer     NOT NULL DEFAULT 1,
-            first_seen        date        NOT NULL DEFAULT current_date,
-            last_seen         date        NOT NULL DEFAULT current_date,
+            id         integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            text       text        NOT NULL,
+            source     text        NOT NULL,   -- il pezzo di frase da cui è nata
+            embedding  vector(768) NOT NULL,   -- prefisso search_document
+            times_seen integer     NOT NULL DEFAULT 1,
+            first_seen date        NOT NULL DEFAULT current_date,
+            last_seen  date        NOT NULL DEFAULT current_date,
 
             CONSTRAINT preferences_text_not_empty CHECK (text <> ''),
             CONSTRAINT preferences_seen_at_least_once CHECK (times_seen >= 1),
