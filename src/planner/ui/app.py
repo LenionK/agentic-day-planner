@@ -56,29 +56,34 @@ TIME_FIELDS = ("fixed_start", "earliest_start", "deadline")
 
 
 @st.cache_resource
-def get_repository() -> PostgresPlanRepository | None:
-    """The plan repository, or None if the database is not reachable (plans are not saved)."""
-    url = Settings().database_url
-    try:
-        with psycopg.connect(url, connect_timeout=3):
-            pass
-    except psycopg.OperationalError:
-        return None
+def _connected_repository(url: str) -> PostgresPlanRepository:
+    """The repository, once the database answered. Raises if it does not.
+
+    cache_resource does not store a result when the function raises: a database that
+    is down when the app starts is tried again on the next run, not forgotten forever.
+    """
+    with psycopg.connect(url, connect_timeout=3):
+        pass
     return PostgresPlanRepository(url)
 
 
-@st.cache_resource
-def purge_on_startup() -> int:
-    """Delete the days older than two weeks, once per app start; return how many.
+def get_repository() -> PostgresPlanRepository | None:
+    """The plan repository, or None if the database is not reachable now (plans are not saved)."""
+    try:
+        return _connected_repository(Settings().database_url)
+    except psycopg.OperationalError:
+        return None
 
-    cache_resource runs it only the first time: later reruns and other browser tabs
-    get the stored count without touching the database again.
+
+@st.cache_resource
+def purge_on_startup(url: str) -> int:
+    """Delete the days older than two weeks, once per database; return how many.
+
+    Called only when the database answers, so a start with Docker off does not skip it.
     """
-    repository = get_repository()
-    return repository.purge_old_days() if repository is not None else 0
+    return PostgresPlanRepository(url).purge_old_days()
 
 
-@st.cache_resource
 def get_preferences() -> PostgresPreferenceRepository | None:
     """The preference memory: only with the database."""
     repository = get_repository()
@@ -86,15 +91,25 @@ def get_preferences() -> PostgresPreferenceRepository | None:
 
 
 @st.cache_resource
-def get_graph():
-    """Created once per server: a new InMemorySaver would forget the paused graphs."""
+def _build_graph(with_database: bool):
+    """One graph with the database and one without, each created once per server.
+
+    A new InMemorySaver would forget the paused graphs, so the graph is cached; the
+    flag in the key makes the app use the graph with saving and memory as soon as the
+    database answers, instead of keeping the one built while it was down.
+    """
     return build_graph(
         build_llm_client(Settings()),
         checkpointer=InMemorySaver(),
-        repository=get_repository(),
+        repository=get_repository() if with_database else None,
         embedder=build_embedder(Settings()),
-        preferences=get_preferences(),
+        preferences=get_preferences() if with_database else None,
     )
+
+
+def get_graph():
+    """The graph for this run: with saving and memory if the database answers."""
+    return _build_graph(get_repository() is not None)
 
 
 def graph_config() -> dict:
@@ -297,6 +312,9 @@ def show_critique(critique: dict) -> None:
     considered = critique.get("recalled_preferences", [])
     if considered:
         st.caption("🧠 Preferenze considerate: " + "; ".join(considered))
+    elif get_preferences() is not None:
+        # la memoria c'è ma è vuota: lo si dice, invece di non mostrare niente
+        st.caption("🧠 Nessuna preferenza ricordata finora da considerare.")
 
 
 def show_suggestions(critique: dict) -> None:
@@ -381,9 +399,15 @@ def show_final(result: dict) -> None:
     show_rejected(tasks)
 
     show_save_result(result.get("save_result"))
-    remembered = result.get("preference_result")
-    if remembered and remembered["message"]:
-        st.info(remembered["message"], icon="🧠")
+    # il passaggio delle preferenze si vede sempre, anche quando non c'era niente da chiedere
+    if "preference_candidates" in result:
+        remembered = result.get("preference_result")
+        if remembered and remembered["message"]:
+            st.info(remembered["message"], icon="🧠")
+        elif not result["preference_candidates"]:
+            st.caption("🧠 Nessuna preferenza da ricordare in questa frase.")
+        else:
+            st.caption("🧠 Nessuna preferenza ricordata.")
 
 
 # nomi italiani scritti a mano: strftime("%A") dipende dalla lingua del sistema
@@ -465,7 +489,7 @@ title_column.title("Agentic day planner")
 if get_repository() is None:
     st.warning("Database non raggiungibile: i piani non verranno salvati. Avvia Docker.")
 else:
-    purged = purge_on_startup()
+    purged = purge_on_startup(get_repository().conninfo)
     if purged and not st.session_state.get("purge_shown"):
         # una notifica sola per sessione: toast scompare da solo dopo qualche secondo
         days = "1 giornata" if purged == 1 else f"{purged} giornate"
