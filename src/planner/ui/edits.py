@@ -15,7 +15,14 @@ def to_time(hhmm: str | None) -> time | None:
 
 
 def _hhmm(value: time | str) -> str:
-    return value.strftime("%H:%M") if isinstance(value, time) else str(value)
+    """time(17, 0) or "17:00:00.000" -> "17:00".
+
+    A time edited in the browser comes back as an ISO string with seconds and
+    milliseconds, not as a datetime.time: both are normalized to "HH:MM".
+    """
+    if isinstance(value, str):
+        value = time.fromisoformat(value)
+    return value.strftime("%H:%M")
 
 
 # campi modificabili e conversione in valori semplici: la tabella restituisce tipi numpy

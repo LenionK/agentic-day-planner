@@ -104,3 +104,19 @@ def test_emptied_time_removes_it():
         edited = rows(t2={"fixed_start": empty})
 
         assert diff_edits(summary_tasks(), edited) == {"edits": {"t2": {"fixed_start": None}}}
+
+
+def test_times_edited_in_the_browser_come_as_iso_strings():
+    # il TimeColumn restituisce stringhe con secondi e millisecondi, non datetime.time
+    edited = rows(t1={"deadline": "17:00:00.000"}, t2={"fixed_start": "09:05:00"})
+
+    result = diff_edits(summary_tasks(), edited)
+
+    assert result == {"edits": {"t1": {"deadline": "17:00"}, "t2": {"fixed_start": "09:05"}}}
+
+
+def test_unchanged_time_as_string_is_not_an_edit():
+    # "15:30" salvato, "15:30:00.000" dal browser: stesso orario, nessuna correzione
+    edited = rows(t2={"fixed_start": "15:30:00.000"})
+
+    assert diff_edits(summary_tasks(), edited) == {"edits": {}}
