@@ -14,6 +14,7 @@ from planner.db.store import (
     SavedDay,
     day_summaries,
     load_day,
+    purge_old_days,
     replace_day,
     save_day,
     scheduled_by_day,
@@ -62,6 +63,11 @@ class PostgresPlanRepository:
         """Saved days, most recent first. For the interface: the graph does not need it."""
         with psycopg.connect(self.conninfo) as conn:
             return day_summaries(conn)
+
+    def purge_old_days(self) -> int:
+        """Delete the days older than two weeks; return how many. Called when the app starts."""
+        with psycopg.connect(self.conninfo) as conn:
+            return purge_old_days(conn)
 
     def history_plans(self) -> dict[date, list[ScheduledTask]]:
         """The plan of every saved day, for the history in the interface."""

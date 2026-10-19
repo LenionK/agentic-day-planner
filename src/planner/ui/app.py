@@ -66,6 +66,17 @@ def get_repository() -> PostgresPlanRepository | None:
 
 
 @st.cache_resource
+def purge_on_startup() -> int:
+    """Delete the days older than two weeks, once per app start; return how many.
+
+    cache_resource runs it only the first time: later reruns and other browser tabs
+    get the stored count without touching the database again.
+    """
+    repository = get_repository()
+    return repository.purge_old_days() if repository is not None else 0
+
+
+@st.cache_resource
 def get_graph():
     """Created once per server: a new InMemorySaver would forget the paused graphs."""
     client = build_llm_client(Settings())
@@ -402,6 +413,12 @@ title_column.title("Agentic day planner")
 if get_repository() is None:
     st.warning("Database non raggiungibile: i piani non verranno salvati. Avvia Docker.")
 else:
+    purged = purge_on_startup()
+    if purged and not st.session_state.get("purge_shown"):
+        # una notifica sola per sessione: toast scompare da solo dopo qualche secondo
+        days = "1 giornata" if purged == 1 else f"{purged} giornate"
+        st.toast(f"Cancellate {days} più vecchie di 2 settimane.", icon="🧹")
+        st.session_state.purge_shown = True
     actions = action_column.container(horizontal=True, horizontal_alignment="right")
     if actions.button("📅 Storico"):
         show_history()  # apre la finestra; senza database il bottone non c'è

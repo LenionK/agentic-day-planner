@@ -3,12 +3,19 @@
 Each test gets the `db` connection from conftest, rolled back at the end.
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 import psycopg
 import pytest
 
-from planner.db.store import day_summaries, load_day, replace_day, save_day, scheduled_by_day
+from planner.db.store import (
+    day_summaries,
+    load_day,
+    purge_old_days,
+    replace_day,
+    save_day,
+    scheduled_by_day,
+)
 from planner.solver.models import DayConfig, Schedule, ScheduledTask, Task
 
 DAY_DATE = date(2026, 10, 20)
@@ -198,3 +205,54 @@ def test_scheduled_by_day_returns_each_plan_in_time_order(db):
     assert list(plans) == [date(2026, 10, 21), DAY_DATE]  # recenti prima
     assert [(s.title, s.start_min) for s in plans[DAY_DATE]] == [("Studio", 480), ("Dentista", 900)]
     assert [s.title for s in plans[date(2026, 10, 21)]] == ["Palestra"]
+
+
+def db_today(conn) -> date:
+    # la data del database, non di Python: il container è in UTC
+    return conn.execute("SELECT current_date").fetchone()[0]
+
+
+def save_empty_day(conn, day_date: date) -> None:
+    save(conn, day_date=day_date, tasks=NEW_TASKS, plan=NEW_PLAN, sources={})
+
+
+def saved_dates(conn) -> set[date]:
+    return {row[0] for row in conn.execute("SELECT day_date FROM days")}
+
+
+def test_purge_deletes_only_days_older_than_two_weeks_with_their_tasks(db):
+    today = db_today(db)
+    old, recent, tomorrow = today - timedelta(20), today - timedelta(10), today + timedelta(1)
+    for day in (old, recent, tomorrow):
+        save_empty_day(db, day)
+
+    deleted = purge_old_days(db)
+
+    assert deleted == 1
+    assert saved_dates(db) == {recent, tomorrow}
+    # i task della giornata cancellata sono spariti con ON DELETE CASCADE
+    assert db.execute("SELECT count(*) FROM tasks").fetchone() == (2,)
+
+
+def test_a_day_exactly_two_weeks_old_is_kept(db):
+    today = db_today(db)
+    save_empty_day(db, today - timedelta(14))
+    save_empty_day(db, today - timedelta(15))
+
+    assert purge_old_days(db) == 1
+    assert saved_dates(db) == {today - timedelta(14)}
+
+
+def test_keep_days_can_be_changed(db):
+    today = db_today(db)
+    save_empty_day(db, today - timedelta(10))
+
+    assert purge_old_days(db, keep_days=5) == 1
+    assert saved_dates(db) == set()
+
+
+def test_purge_with_nothing_old_deletes_nothing(db):
+    save_empty_day(db, db_today(db))
+
+    assert purge_old_days(db) == 0
+    assert len(saved_dates(db)) == 1

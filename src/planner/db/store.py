@@ -212,3 +212,21 @@ def scheduled_by_day(conn: psycopg.Connection) -> dict[date, list[ScheduledTask]
                 )
             )
         return plans
+
+
+KEEP_DAYS = 14  # le giornate più vecchie di due settimane si cancellano
+
+
+def purge_old_days(conn: psycopg.Connection, keep_days: int = KEEP_DAYS) -> int:
+    """Delete the days older than keep_days with the purge_old_days procedure.
+
+    Returns how many days were deleted: CALL returns nothing, so they are counted first
+    with the same condition, in the same transaction.
+    """
+    with conn.transaction():
+        # ::integer: "data - intero" esiste solo per integer, psycopg potrebbe mandare smallint
+        (count,) = conn.execute(
+            "SELECT count(*) FROM days WHERE day_date < current_date - %s::integer", (keep_days,)
+        ).fetchone()
+        conn.execute("CALL purge_old_days(%s::integer)", (keep_days,))
+    return count

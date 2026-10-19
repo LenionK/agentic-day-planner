@@ -29,14 +29,14 @@
   - [x] unione: se la data ha già un piano, i suoi task si uniscono ai nuovi, bloccati al loro orario (solo per il solver); il Critico valuta la giornata intera; "Sostituisci il piano salvato" nella conferma
   - [x] interfaccia: selettore della data, "Già in agenda" nella conferma, un solo bottone di conferma, esito del salvataggio
   - [x] view `day_summary` (revisione 0003): per giornata task, obbligatori, minuti e percentuale occupati; "Storico" nella barra laterale
-  - [ ] funzione `frequent_tasks(n)`: task più frequenti, durata media, orario medio (base per la memoria)
-  - [ ] procedura `purge_days_before(data)` con `CALL`
+  - [x] procedura `purge_old_days(keep_days = 14)` (revisione 0004), chiamata con `CALL` all'avvio dell'app: le giornate più vecchie di 2 settimane si cancellano, con i loro task
 - [ ] Memoria con pgvector (preferenze e giornate passate)
 - [ ] API FastAPI ed export `.ics`
 - [ ] Eval dei modelli (Qwen2.5 7B, Phi-4 mini, Llama 3.1 8B, Aya Expanse 8B) sulla GTX 1060
 - [ ] CI con GitHub Actions, AWS con LocalStack e CDK
 
 ## Estensioni
+- [ ] **Funzione `frequent_tasks(n)`** nel database: task più frequenti, durata media, orario medio di inizio; da mostrare nello Storico.
 - [ ] **Proposte del Critico nel piano:** le proposte accettate (`{"accepted": [...]}`) diventano `Task` con id nuovi, priorità bassa e non obbligatori, si aggiungono ai task e tornano allo scheduler; un campo nello stato fa girare il Critico una sola volta (altrimenti dopo lo scheduler si torna al Critico all'infinito). Interfaccia: una casella per proposta e "Aggiungi e ripianifica".
 - [ ] **Valutazione del Critico** su giornate di prova (piene, vuote, a metà) con il giudizio atteso, anche con l'ordine dei campi invertito per misurare l'effetto del ragionamento prima della decisione.
 - [ ] **Critico del parser:** controlli deterministici di ogni task rispetto al suo `source` ("13 ore" → 780 minuti, "se riesco" → priorità 1, "devo" → 5), con avvisi nella conferma; misurato con `run_eval.py` prima e dopo.
@@ -71,6 +71,7 @@
 - **Editor separato da chi decide:** interfaccia e futuro agente producono lo stesso formato di correzioni; l'editor le valida e le applica. Correzione su id inesistente o che rende il task invalido: ignorata per intero, con avviso.
 - **Interfaccia:** Streamlit per ora (solo Python); FastAPI quando servirà un'API vera (`.ics`, altri client). Il grafo non cambia.
 - **Database, una giornata per data:** vincolo `UNIQUE (day_date)` come ultima difesa. Il controllo avviene subito dopo il parser, non alla fine: se la data esiste già, i task salvati entrano nella conferma (non modificabili, bloccati al loro orario) e l'unione è il comportamento normale; "Sostituisci il piano salvato" li scarta. Alla fine la giornata viene riscritta in una transazione (i task vecchi spariscono con `ON DELETE CASCADE`). Così il Critico valuta la giornata intera. Per non toccare il piano salvato basta non confermare: si salva solo alla fine.
+- **Pulizia delle giornate:** si tengono solo le ultime 2 settimane (più le future), con una procedura nel database chiamata all'avvio dell'app; le preferenze, in una tabella senza legami con le giornate, restano anche quando la giornata da cui sono nate viene cancellata.
 - **Si salva solo il piano:** i task rimasti fuori (accettati in revisione) non entrano nel database; il messaggio finale li elenca. Le colonne `scheduled_*` di `tasks` restano annullabili, ma dall'app arrivano sempre piene.
 - **Un solo bottone di conferma:** `diff_edits` capisce da solo se la tabella è cambiata; nessun checksum (servirebbe comunque sapere *cosa* è cambiato, e sarebbe fragile con "15:30" e "15:30:00.000").
 - **Migrazioni con Alembic, SQL puro:** revisioni con `op.execute`, una transazione per revisione; SQLAlchemy solo come motore di Alembic, l'app usa `psycopg` diretto. Una revisione già condivisa non si modifica: se ne scrive una nuova.
