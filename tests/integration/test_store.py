@@ -8,7 +8,7 @@ from datetime import date
 import psycopg
 import pytest
 
-from planner.db.store import load_day, save_day
+from planner.db.store import load_day, replace_day, save_day
 from planner.solver.models import DayConfig, Schedule, ScheduledTask, Task
 
 DAY_DATE = date(2026, 10, 20)
@@ -114,3 +114,54 @@ def test_each_test_starts_from_empty_tables(db, attempt):
     save(db)
 
     assert db.execute("SELECT count(*) FROM days").fetchone() == (1,)
+
+
+NEW_TASKS = [Task(id="t1", title="Palestra", duration_min=90, priority=3)]
+NEW_PLAN = Schedule(
+    status="OPTIMAL",
+    scheduled=[ScheduledTask(task_id="t1", title="Palestra", start_min=1020, end_min=1110)],
+)
+
+
+def replace(conn, **changes) -> int:
+    args = {
+        "day_date": DAY_DATE,
+        "user_input": "palestra un'ora e mezza",
+        "day": DAY,
+        "tasks": NEW_TASKS,
+        "plan": NEW_PLAN,
+        "sources": {"t1": "palestra un'ora e mezza"},
+    } | changes
+    return replace_day(conn, **args)
+
+
+def test_replace_puts_the_new_day_in_place_of_the_old_one(db):
+    old_id = save(db)
+
+    new_id = replace(db)
+
+    saved = load_day(db, DAY_DATE)
+    assert new_id != old_id
+    assert saved.user_input == "palestra un'ora e mezza"
+    assert saved.tasks == NEW_TASKS  # i task vecchi sono spariti con ON DELETE CASCADE
+    assert db.execute("SELECT count(*) FROM tasks").fetchone() == (1,)
+
+
+def test_replace_on_a_new_date_is_a_normal_save(db):
+    replace(db)
+
+    assert load_day(db, DAY_DATE).tasks == NEW_TASKS
+
+
+def test_failed_replace_keeps_the_old_day(db):
+    save(db)
+    wrong_plan = Schedule(
+        status="OPTIMAL",
+        scheduled=[ScheduledTask(task_id="t1", title="Palestra", start_min=1020, end_min=1030)],
+    )
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        replace(db, plan=wrong_plan)
+
+    # cancellazione e inserimento nella stessa transazione: la vecchia giornata è ancora lì
+    assert load_day(db, DAY_DATE).tasks == TASKS

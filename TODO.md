@@ -22,7 +22,13 @@
 - [x] Critico della giornata (`agents/critic.py`): buchi liberi e fatti calcolati in Python; nodo `critic` con LLM (valutazione → vuota sì/no → proposte) e nodo `suggest_activities` con interrupt; proposte che non entrano in nessun buco scartate con avviso; nell'interfaccia piano, fatti come dati e commento come opinione
 
 ## Prossimi passi
-- [ ] Database: tabelle, view e stored procedure; nodo `salva_piano` prima di END (piano completo o accettato)
+- [ ] Database (PostgreSQL)
+  - [x] schema con Alembic: `days` (una per data) e `tasks` (chiave esterna con `ON DELETE CASCADE`)
+  - [x] `store.py` (salva, rilegge, sostituisce in una transazione) e test di integrazione su `planner_test`
+  - [x] salvataggio nel grafo: `check_saved_day` → `ask_existing_day` (sostituisci / mantieni) → `save_plan`; archivio iniettato con un `Protocol`
+  - [x] interfaccia: selettore della data, i due piani affiancati, esito del salvataggio
+  - [ ] "unisci": i task salvati restano fermi, quelli nuovi entrano negli spazi liberi
+  - [ ] view e stored procedure (statistiche sulle giornate passate); storico nell'interfaccia
 - [ ] Memoria con pgvector (preferenze e giornate passate)
 - [ ] API FastAPI ed export `.ics`
 - [ ] Eval dei modelli (Qwen2.5 7B, Phi-4 mini, Llama 3.1 8B, Aya Expanse 8B) sulla GTX 1060

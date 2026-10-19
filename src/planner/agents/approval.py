@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from planner.agents.parser import RejectedTask
+from planner.db.store import SavedDay
 from planner.solver.models import Schedule, Task, fmt_time
 
 # il campo "step" di ogni riepilogo dice al chiamante a quale domanda sta rispondendo
@@ -10,6 +11,7 @@ CONFIRM_TASKS = "confirm_tasks"
 RESOLVE_CONFLICT = "resolve_conflict"
 REVIEW_PLAN = "review_plan"
 SUGGEST_ACTIVITIES = "suggest_activities"
+EXISTING_DAY = "existing_day"
 
 
 class TaskSummary(BaseModel):
@@ -137,3 +139,35 @@ def conflict_summary(plan: Schedule, tasks: list[Task], warnings: list[str]) -> 
         warnings=warnings,
     )
     return summary.model_dump(mode="json")
+
+
+class SavedDaySummary(BaseModel):
+    """A day already in the database, as shown to the user."""
+
+    user_input: str
+    scheduled: list[ScheduledSummary]  # in ordine di orario
+    unscheduled: list[str]
+
+
+def saved_day_summary(saved: SavedDay) -> dict:
+    """Build the summary of a saved day, as plain JSON data."""
+    in_plan = {item.task_id for item in saved.scheduled}
+    summary = SavedDaySummary(
+        user_input=saved.user_input,
+        scheduled=[
+            ScheduledSummary(
+                title=item.title, start=fmt_time(item.start_min), end=fmt_time(item.end_min)
+            )
+            for item in saved.scheduled
+        ],
+        unscheduled=[task.title for task in saved.tasks if task.id not in in_plan],
+    )
+    return summary.model_dump(mode="json")
+
+
+class ExistingDayResponse(BaseModel):
+    """What to do when the date is already saved: replace the saved day or keep it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    choice: Literal["replace", "keep"]

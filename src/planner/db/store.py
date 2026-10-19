@@ -99,6 +99,26 @@ def save_day(
     return day_id
 
 
+def replace_day(
+    conn: psycopg.Connection,
+    day_date: date,
+    user_input: str,
+    day: DayConfig,
+    tasks: list[Task],
+    plan: Schedule,
+    sources: dict[str, str],
+) -> int:
+    """Save a day in place of the one already saved for that date (if any).
+
+    Delete and insert happen in one transaction: if the new day is rejected,
+    the old one is still there. The old tasks go with ON DELETE CASCADE.
+    """
+    with conn.transaction():
+        conn.execute("DELETE FROM days WHERE day_date = %s", (day_date,))
+        # dentro una transazione aperta, quella di save_day diventa un savepoint
+        return save_day(conn, day_date, user_input, day, tasks, plan, sources)
+
+
 def load_day(conn: psycopg.Connection, day_date: date) -> SavedDay | None:
     """Read back a saved day, or None if that date was never saved."""
     with conn.cursor(row_factory=dict_row) as cur:

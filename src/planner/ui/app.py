@@ -9,8 +9,10 @@ import os
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
 import uuid
+from datetime import date, timedelta
 
 import pandas as pd
+import psycopg
 import streamlit as st
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
@@ -18,6 +20,7 @@ from pydantic import ValidationError
 
 from planner.agents.approval import (
     CONFIRM_TASKS,
+    EXISTING_DAY,
     RESOLVE_CONFLICT,
     REVIEW_PLAN,
     SUGGEST_ACTIVITIES,
@@ -27,6 +30,7 @@ from planner.agents.approval import (
 from planner.agents.critic import duration_text
 from planner.agents.graph import all_warnings, build_graph
 from planner.config import Settings
+from planner.db.repository import PostgresPlanRepository
 from planner.llm.factory import build_llm_client
 from planner.solver.models import DayConfig
 from planner.ui.edits import diff_edits, to_time
@@ -51,10 +55,22 @@ TIME_FIELDS = ("fixed_start", "earliest_start", "deadline")
 
 
 @st.cache_resource
+def get_repository() -> PostgresPlanRepository | None:
+    """The plan repository, or None if the database is not reachable (plans are not saved)."""
+    url = Settings().database_url
+    try:
+        with psycopg.connect(url, connect_timeout=3):
+            pass
+    except psycopg.OperationalError:
+        return None
+    return PostgresPlanRepository(url)
+
+
+@st.cache_resource
 def get_graph():
     """Created once per server: a new InMemorySaver would forget the paused graphs."""
     client = build_llm_client(Settings())
-    return build_graph(client, checkpointer=InMemorySaver())
+    return build_graph(client, checkpointer=InMemorySaver(), repository=get_repository())
 
 
 def graph_config() -> dict:
@@ -73,12 +89,13 @@ def remember(result: dict) -> None:
         st.session_state.final = result
 
 
-def start_planning(text: str) -> None:
+def start_planning(text: str, day_date: date) -> None:
     """Run the graph until its first question."""
     st.session_state.thread_id = str(uuid.uuid4())  # una conversazione nuova per ogni frase
     st.session_state.round = 0
     st.session_state.pop("final", None)
-    remember(get_graph().invoke({"user_input": text, "day": DayConfig()}, graph_config()))
+    start = {"user_input": text, "day": DayConfig(), "day_date": day_date}
+    remember(get_graph().invoke(start, graph_config()))
 
 
 def answer(response: dict, error_prefix: str) -> None:
@@ -170,10 +187,10 @@ def show_conflict(summary: dict) -> None:
         answer(diff_edits(summary["tasks"], edited.to_dict("index")), "Correzioni non valide")
 
 
-def show_plan(plan: dict) -> None:
-    st.subheader("Piano della giornata")
+def show_schedule(plan: dict, where=st) -> None:
+    """The scheduled tasks as a table, plus the ones left out."""
     if plan["scheduled"]:
-        st.dataframe(
+        where.dataframe(
             [
                 {"Dalle": s["start"], "Alle": s["end"], "Task": s["title"]}
                 for s in plan["scheduled"]
@@ -181,10 +198,36 @@ def show_plan(plan: dict) -> None:
             hide_index=True,
         )
     else:
-        st.info("Nessun task nel piano.")
+        where.info("Nessun task nel piano.")
     if plan["unscheduled"]:
-        st.warning(f"Non inseriti: {', '.join(plan['unscheduled'])}")
+        where.warning(f"Non inseriti: {', '.join(plan['unscheduled'])}")
+
+
+def show_plan(plan: dict) -> None:
+    st.subheader("Piano della giornata")
+    show_schedule(plan)
     show_warnings(plan)
+
+
+def italian_date(iso: str) -> str:
+    return date.fromisoformat(iso).strftime("%d/%m/%Y")
+
+
+def show_existing_day(question: dict) -> None:
+    st.subheader(f"Hai già un piano per il {italian_date(question['day_date'])}")
+    saved, new = st.columns(2)
+    saved.markdown("**Piano salvato**")
+    saved.caption(f"«{question['saved']['user_input']}»")
+    show_schedule(question["saved"], where=saved)
+    new.markdown("**Piano nuovo**")
+    new.caption(" ")  # allinea le due tabelle
+    show_schedule(question["new"], where=new)
+
+    buttons = right_aligned_buttons()
+    if buttons.button("Sostituisci con il nuovo", type="primary"):
+        answer({"choice": "replace"}, "Risposta non valida")
+    if buttons.button("Mantieni quello salvato"):
+        answer({"choice": "keep"}, "Risposta non valida")
 
 
 def show_review(plan: dict) -> None:
@@ -247,8 +290,13 @@ def show_suggestions(critique: dict) -> None:
 
 
 def show_final(result: dict) -> None:
-    # TODO: quando ci sarà il database, il grafo salverà il piano in un nodo prima di END
-    st.success("Piano confermato.")
+    saved = result.get("save_result")
+    if saved is None:
+        st.success("Piano confermato.")  # database non raggiungibile: niente salvataggio
+    elif saved["saved"]:
+        st.success(saved["message"])
+    else:
+        st.info(saved["message"])
     show_plan(plan_summary(result["schedule"], result["tasks"], all_warnings(result)))
     if "critique" in result:
         st.subheader("Il Critico")
@@ -261,18 +309,21 @@ def show_final(result: dict) -> None:
 
 
 st.title("Agentic day planner")
+if get_repository() is None:
+    st.warning("Database non raggiungibile: i piani non verranno salvati. Avvia Docker.")
 
 # in un form Invio equivale al bottone; text_input perché in text_area Invio va a capo
 with st.form("sentence"):
+    day_date = st.date_input("Giorno", value=date.today() + timedelta(days=1), format="DD/MM/YYYY")
     text = st.text_input(
         "Cosa devi fare?",
-        placeholder="domani devo studiare 2 ore, dentista alle 15, se riesco la spesa",
+        placeholder="devo studiare 2 ore, dentista alle 15, se riesco la spesa",
     )
     submitted = st.form_submit_button("Pianifica")
 if submitted:
     if text.strip():
         with st.spinner("Sto leggendo la frase..."):
-            start_planning(text)
+            start_planning(text, day_date)
     else:
         st.warning("Scrivi cosa devi fare.")
 
@@ -290,3 +341,5 @@ elif "pending" in st.session_state:
         show_review(st.session_state.pending)
     elif step == SUGGEST_ACTIVITIES:
         show_suggestions(st.session_state.pending)
+    elif step == EXISTING_DAY:
+        show_existing_day(st.session_state.pending)
