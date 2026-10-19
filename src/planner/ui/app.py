@@ -31,7 +31,7 @@ from planner.agents.graph import all_warnings, build_graph
 from planner.config import Settings
 from planner.db.repository import PostgresPlanRepository
 from planner.llm.factory import build_llm_client
-from planner.solver.models import DayConfig
+from planner.solver.models import DayConfig, fmt_time
 from planner.ui.edits import diff_edits, to_time
 
 # colonne della tabella: nomi interni (quelli del riepilogo) -> come appaiono all'utente
@@ -292,14 +292,19 @@ def show_suggestions(critique: dict) -> None:
         answer({"accepted": []}, "Risposta non valida")
 
 
-def show_final(result: dict) -> None:
-    saved = result.get("save_result")
+def show_save_result(saved: dict | None) -> None:
+    """The outcome of saving, at the bottom: it is the last thing that happened."""
+    st.divider()
     if saved is None:
-        st.success("Piano confermato.")  # database non raggiungibile: niente salvataggio
+        st.success("Piano confermato.", icon="✅")  # database non raggiungibile: non salvato
     elif saved["saved"]:
-        st.success(saved["message"])
+        st.success(saved["message"], icon="✅")
     else:
-        st.info(saved["message"])
+        # un piano non salvato va notato: avviso, non una semplice informazione
+        st.warning(saved["message"], icon="⚠️")
+
+
+def show_final(result: dict) -> None:
     show_plan(plan_summary(result["schedule"], result["tasks"], all_warnings(result)))
     if "critique" in result:
         st.subheader("Il Critico")
@@ -307,8 +312,22 @@ def show_final(result: dict) -> None:
 
     tasks = approval(result["tasks"], result["rejected"], [])
     st.subheader("Task confermati")
-    st.dataframe(tasks_table(tasks["tasks"]), column_config=COLUMNS, hide_index=True)
+    # confermati non vuol dire inseriti: la colonna dice dove è finito ognuno,
+    # così un task escluso dal piano non sembra rientrato
+    slots = {
+        item.task_id: f"{fmt_time(item.start_min)}–{fmt_time(item.end_min)}"
+        for item in result["schedule"].scheduled
+    }
+    table = tasks_table(tasks["tasks"])
+    table.insert(0, "slot", [slots.get(task_id, "non inserito") for task_id in table.index])
+    st.dataframe(
+        table,
+        column_config={"slot": st.column_config.TextColumn("Nel piano")} | COLUMNS,
+        hide_index=True,
+    )
     show_rejected(tasks)
+
+    show_save_result(result.get("save_result"))
 
 
 st.title("Agentic day planner")
