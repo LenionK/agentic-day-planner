@@ -4,6 +4,9 @@ Local-first agentic day planner: describe your day in plain language and get an 
 saved day by day, with a memory of your preferences.
 LangGraph + Ollama + OR-Tools CP-SAT + PostgreSQL/pgvector, 100% free stack.
 
+Want to study these technologies? The [booklet in `docs/`](docs/README.md) (in Italian) explains each
+one through this project's code, including the mistakes made along the way.
+
 ## What it does
 
 You pick a day and write something like *"devo studiare 2 ore, la mattina mi concentro meglio,
@@ -222,6 +225,7 @@ tests/
   unit/        unit and graph tests (fake client, embedder and repositories, InMemorySaver)
   integration/ database tests on planner_test
   eval/        evaluation cases and measurement scripts (need Ollama)
+docs/          booklet on the technologies used, in Italian
 ```
 
 ## Status and roadmap
