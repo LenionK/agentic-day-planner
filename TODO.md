@@ -62,6 +62,8 @@
 - **Conferma dell'utente:** il riepilogo non mostra il `source` (serve solo al grounding del Parser). La risposta contiene solo le differenze (`{"edits": {"t2": {"priority": 2}}}`, `{"edits": {}}` = confermo tutto), non la lista completa.
 - **Editor separato da chi decide:** interfaccia e futuro agente producono lo stesso formato di correzioni; l'editor le valida e le applica. Correzione su id inesistente o che rende il task invalido: ignorata per intero, con avviso.
 - **Interfaccia:** Streamlit per ora (solo Python); FastAPI quando servirà un'API vera (`.ics`, altri client). Il grafo non cambia.
+- **Database, una giornata per data:** vincolo `UNIQUE (day_date)` come ultima difesa; al salvataggio il grafo controlla se la data esiste già e, se sì, chiede all'utente se sovrascrivere (sì: in una transazione cancella la vecchia giornata, i task spariscono con `ON DELETE CASCADE`, e inserisce la nuova; no: non salva).
+- **Migrazioni con Alembic, SQL puro:** revisioni con `op.execute`, una transazione per revisione; SQLAlchemy solo come motore di Alembic, l'app usa `psycopg` diretto. Una revisione già condivisa non si modifica: se ne scrive una nuova.
 - **Checkpoint:** `LANGGRAPH_STRICT_MSGPACK=true`; LangGraph ammette da solo i tipi dichiarati in `PlannerState`.
 - **Domande all'utente:** ogni riepilogo passato a `interrupt` ha un campo `step` (`confirm_tasks`, `resolve_conflict`, `review_plan`) che dice al chiamante a quale domanda risponde; ogni domanda ha il suo `response_schema`.
 - **Avvisi tra un giro e l'altro:** quelli del Parser restano sempre; dell'editor si tengono solo quelli dell'ultimo giro (`edit_warnings`), quelli vecchi riguardano correzioni superate.
