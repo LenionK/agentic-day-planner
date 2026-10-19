@@ -22,6 +22,8 @@
 - [x] Critico della giornata (`agents/critic.py`): buchi liberi e fatti calcolati in Python; nodo `critic` con LLM (valutazione → vuota sì/no → proposte) e nodo `suggest_activities` con interrupt; proposte che non entrano in nessun buco scartate con avviso; nell'interfaccia piano, fatti come dati e commento come opinione
 
 ## Prossimi passi
+- [ ] **Migliorare l'interfaccia:** oggi alcune cose non si notano (la domanda sulle preferenze arriva solo alla fine e solo se la frase ne contiene una; i messaggi della memoria sono piccoli). Da rivedere: ordine delle schermate, messaggi più chiari, indicare in che passo del flusso si è, testi delle preferenze modificabili nella conferma.
+- [ ] **Rivedere quando salvare le preferenze:** oggi si estraggono solo dopo il salvataggio del piano e si confermano in una schermata a parte alla fine; valutare se chiederle insieme alla conferma dei task, se ricavarle anche dal comportamento (task spostati, orari scelti spesso) e cosa fare se l'utente abbandona la domanda.
 - [ ] Database (PostgreSQL)
   - [x] schema con Alembic: `days` (una per data) e `tasks` (chiave esterna con `ON DELETE CASCADE`)
   - [x] `store.py` (salva, rilegge, sostituisce in una transazione) e test di integrazione su `planner_test`
