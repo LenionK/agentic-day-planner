@@ -106,15 +106,11 @@ class PostgresPlanRepository:
 class PreferenceRepository(Protocol):
     """What the graph needs to remember preferences (vectors are lists of floats)."""
 
-    def similar(
-        self, cluster_embedding: list[float], min_similarity: float
-    ) -> list[SimilarPreference]:
+    def similar(self, query: list[float], min_similarity: float) -> list[SimilarPreference]:
         """Saved preferences close to this one, the closest first (at most 3)."""
         ...
 
-    def add(
-        self, text: str, source: str, embedding: list[float], cluster_embedding: list[float]
-    ) -> int: ...
+    def add(self, text: str, source: str, embedding: list[float]) -> int: ...
 
     def mark_seen(self, pref_id: int) -> None: ...
 
@@ -127,17 +123,13 @@ class PostgresPreferenceRepository:
     def __init__(self, conninfo: str) -> None:
         self.conninfo = conninfo
 
-    def similar(
-        self, cluster_embedding: list[float], min_similarity: float
-    ) -> list[SimilarPreference]:
+    def similar(self, query: list[float], min_similarity: float) -> list[SimilarPreference]:
         with psycopg.connect(self.conninfo) as conn:
-            return similar_preferences(conn, cluster_embedding, min_similarity)
+            return similar_preferences(conn, query, min_similarity)
 
-    def add(
-        self, text: str, source: str, embedding: list[float], cluster_embedding: list[float]
-    ) -> int:
+    def add(self, text: str, source: str, embedding: list[float]) -> int:
         with psycopg.connect(self.conninfo) as conn:
-            return insert_preference(conn, text, source, embedding, cluster_embedding)
+            return insert_preference(conn, text, source, embedding)
 
     def mark_seen(self, pref_id: int) -> None:
         with psycopg.connect(self.conninfo) as conn:

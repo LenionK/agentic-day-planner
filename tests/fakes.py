@@ -100,28 +100,23 @@ class FakePreferenceRepository:
         self.rows: dict[int, dict] = {}
         self.next_id = 1
 
-    def add(
-        self, text: str, source: str, embedding: list[float], cluster_embedding: list[float]
-    ) -> int:
+    def add(self, text: str, source: str, embedding: list[float]) -> int:
         pref_id = self.next_id
         self.next_id += 1
         self.rows[pref_id] = {
             "text": text,
             "source": source,
             "embedding": embedding,
-            "cluster": cluster_embedding,
             "times_seen": 1,
         }
         return pref_id
 
-    def similar(
-        self, cluster_embedding: list[float], min_similarity: float
-    ) -> list[SimilarPreference]:
+    def similar(self, query: list[float], min_similarity: float) -> list[SimilarPreference]:
         found = [
             SimilarPreference(
                 id=pref_id,
                 text=row["text"],
-                similarity=cosine_similarity(cluster_embedding, row["cluster"]),
+                similarity=cosine_similarity(query, row["embedding"]),
             )
             for pref_id, row in self.rows.items()
         ]

@@ -4,16 +4,11 @@ from typing import Literal
 # nomic-embed-text restituisce vettori di 768 numeri: la colonna vector(768) deve coincidere
 EMBED_DIM = 768
 
-# nomic-embed-text vuole davanti al testo l'intento:
-# - document / query: ricerca, un testo breve che cerca contro testi che rispondono
-# - clustering: confronto tra testi dello stesso tipo, per raggruppare quelli che
-#   dicono la stessa cosa (pulizia delle preferenze duplicate)
-PREFIXES = {
-    "document": "search_document: ",
-    "query": "search_query: ",
-    "clustering": "clustering: ",
-}
-Kind = Literal["document", "query", "clustering"]
+# nomic-embed-text vuole davanti al testo l'intento: cosa si salva (document) e con cosa
+# si cerca (query). Le preferenze si salvano come document; una preferenza nuova o un
+# task cercano come query, sia per i duplicati sia per il recupero
+PREFIXES = {"document": "search_document: ", "query": "search_query: "}
+Kind = Literal["document", "query"]
 
 
 class Embedder(ABC):
@@ -28,7 +23,7 @@ class Embedder(ABC):
         """Return one vector per text, in the same order. The texts already have the prefix."""
 
     def embed(self, texts: list[str], kind: Kind) -> list[list[float]]:
-        """Vectors for texts to store ("document"), to search with ("query") or to group ("clustering").
+        """Vectors for texts to store ("document") or to search with ("query").
 
         Raises ValueError if the service returns the wrong number of vectors or a
         vector of the wrong size: better here than when PostgreSQL rejects it.

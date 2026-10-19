@@ -14,7 +14,6 @@ from tests.fakes import FakeEmbedder, unit
     [
         ("document", "search_document: "),
         ("query", "search_query: "),
-        ("clustering", "clustering: "),
     ],
 )
 def test_each_kind_adds_its_prefix(kind, prefix):
@@ -34,7 +33,7 @@ def test_vectors_come_back_in_the_order_of_the_texts():
 def test_empty_list_makes_no_call():
     embedder = FakeEmbedder()
 
-    assert embedder.embed([], "clustering") == []
+    assert embedder.embed([], "query") == []
     assert embedder.calls == []
 
 

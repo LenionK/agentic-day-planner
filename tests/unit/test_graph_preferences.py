@@ -78,7 +78,7 @@ def test_new_preference_is_asked_and_kept_when_confirmed():
 
 def test_close_saved_preference_is_shown_and_can_be_deleted():
     memory = FakePreferenceRepository()
-    morning_id = memory.add(MORNING, "la mattina", unit(5), unit(1))
+    morning_id = memory.add(MORNING, "la mattina", unit(1))
     close = [0.0] * len(unit(1))
     close[1], close[2] = 0.93, (1 - 0.93**2) ** 0.5
     graph, config, paused = run([extracted(EVENING), judge(False)], memory, {EVENING: close})
@@ -103,7 +103,7 @@ def test_rejecting_the_preference_saves_nothing():
 
 def test_duplicate_is_counted_without_asking():
     memory = FakePreferenceRepository()
-    morning_id = memory.add(MORNING, "la mattina", unit(5), unit(1))
+    morning_id = memory.add(MORNING, "la mattina", unit(1))
     _, _, final = run(
         [extracted("la mattina studia meglio"), judge(True)],
         memory,

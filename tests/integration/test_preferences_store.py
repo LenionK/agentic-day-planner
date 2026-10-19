@@ -24,8 +24,8 @@ def between(i: int, j: int, cos: float) -> list[float]:
     return vector
 
 
-def add(conn, text: str, cluster: list[float]) -> int:
-    return insert_preference(conn, text, f"«{text}»", unit(0), cluster)
+def add(conn, text: str, embedding: list[float]) -> int:
+    return insert_preference(conn, text, f"«{text}»", embedding)
 
 
 def test_inserted_preference_is_listed_with_defaults(db):
@@ -103,7 +103,7 @@ def test_list_is_ordered_by_last_seen(db):
 
 def test_vector_of_the_wrong_size_is_rejected_by_the_database(db):
     with pytest.raises(psycopg.errors.DataException, match="768 dimensions"):
-        insert_preference(db, "x", "x", [1.0, 0.0, 0.0], unit(1))
+        insert_preference(db, "x", "x", [1.0, 0.0, 0.0])
 
 
 def test_preferences_survive_the_purge_of_old_days(db):

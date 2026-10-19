@@ -132,10 +132,11 @@ def same_preference(new: str, existing: str, client: LLMClient) -> bool:
     return client.generate(messages, SameVerdict).same
 
 
-# sopra questa similarità (vettori clustering) una preferenza salvata è una candidata:
-# il giudice decide se è la stessa, l'utente se cancellarla. Misurata in run_embeddings.py:
-# le parafrasi vere stavano tra 0.90 e 0.97
-SIMILAR_MIN = 0.85
+# sopra questa similarità (nuova come query, salvate come document) una preferenza salvata
+# è una candidata: il giudice decide se è la stessa, l'utente se cancellarla.
+# Misurata in run_embeddings.py: le coppie da mostrare (uguali o in contraddizione)
+# partivano da 0.66, le preferenze diverse arrivavano a 0.62
+SIMILAR_MIN = 0.63
 
 
 class PreferencesResponse(BaseModel):
@@ -157,7 +158,7 @@ def find_candidates(
     close ones are kept as `similar`, for the user to decide. Plain JSON data for the state.
     """
     drafts, warnings = extract_preferences(sentence, client)
-    vectors = embedder.embed([d.text for d in drafts], "clustering")
+    vectors = embedder.embed([d.text for d in drafts], "query")
 
     candidates = []
     for draft, vector in zip(drafts, vectors, strict=True):
@@ -198,9 +199,8 @@ def store_preferences(
     to_save = [candidates[i] for i in sorted(set(response.keep) & new)]
     texts = [c["text"] for c in to_save]
     documents = embedder.embed(texts, "document")
-    clusters = embedder.embed(texts, "clustering")
-    for candidate, doc, cluster in zip(to_save, documents, clusters, strict=True):
-        repository.add(candidate["text"], candidate["source"], doc, cluster)
+    for candidate, doc in zip(to_save, documents, strict=True):
+        repository.add(candidate["text"], candidate["source"], doc)
 
     shown = {s["id"] for c in candidates for s in c["similar"]}
     deleted = sum(repository.delete(pref_id) for pref_id in set(response.delete) & shown)

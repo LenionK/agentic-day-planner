@@ -34,24 +34,26 @@ def insert_preference(
     text: str,
     source: str,
     embedding: list[float],
-    cluster_embedding: list[float],
 ) -> int:
     """Save a new preference, seen once today; return its id."""
     (pref_id,) = conn.execute(
         """
-        INSERT INTO preferences (text, source, embedding, cluster_embedding)
-        VALUES (%s, %s, %s::vector, %s::vector)
+        INSERT INTO preferences (text, source, embedding)
+        VALUES (%s, %s, %s::vector)
         RETURNING id
         """,
-        (text, source, embedding, cluster_embedding),
+        (text, source, embedding),
     ).fetchone()
     return pref_id
 
 
 def similar_preferences(
-    conn: psycopg.Connection, cluster_embedding: list[float], min_similarity: float, limit: int = 3
+    conn: psycopg.Connection, query: list[float], min_similarity: float, limit: int = 3
 ) -> list[SimilarPreference]:
-    """Saved preferences close to this one (clustering vectors), the closest first.
+    """Saved preferences close to a query vector, the closest first.
+
+    The query is a new preference (embedded as "query") or a task of a new day; the
+    saved ones are documents. Used both for duplicates and for retrieval.
 
     Only candidates: being close does not mean saying the same thing ("studiare la mattina"
     and "la sera" are very close). The judge or the user decides.
@@ -59,13 +61,13 @@ def similar_preferences(
     with conn.cursor(row_factory=class_row(SimilarPreference)) as cur:
         cur.execute(
             """
-            SELECT id, text, 1 - (cluster_embedding <=> %(vec)s::vector) AS similarity
+            SELECT id, text, 1 - (embedding <=> %(vec)s::vector) AS similarity
             FROM preferences
-            WHERE 1 - (cluster_embedding <=> %(vec)s::vector) >= %(min)s
-            ORDER BY cluster_embedding <=> %(vec)s::vector
+            WHERE 1 - (embedding <=> %(vec)s::vector) >= %(min)s
+            ORDER BY embedding <=> %(vec)s::vector
             LIMIT %(limit)s
             """,
-            {"vec": cluster_embedding, "min": min_similarity, "limit": limit},
+            {"vec": query, "min": min_similarity, "limit": limit},
         )
         return cur.fetchall()
 

@@ -125,7 +125,7 @@ SENTENCE = "studio la sera, preferisco così"
 
 def memory_with_morning() -> tuple[FakePreferenceRepository, int]:
     repository = FakePreferenceRepository()
-    pref_id = repository.add(MORNING, "la mattina", unit(5), unit(1))
+    pref_id = repository.add(MORNING, "la mattina", unit(1))
     return repository, pref_id
 
 
@@ -175,7 +175,7 @@ def candidate(text: str, duplicate_of=None, similar=()) -> dict:
 
 def test_store_saves_kept_ones_counts_duplicates_and_deletes_shown_ones():
     repository, morning_id = memory_with_morning()
-    other_id = repository.add("fa la spesa il sabato", "x", unit(6), unit(3))
+    other_id = repository.add("fa la spesa il sabato", "x", unit(3))
     candidates = [
         candidate(EVENING, similar=[{"id": morning_id, "text": MORNING}]),
         candidate("legge prima di dormire"),
