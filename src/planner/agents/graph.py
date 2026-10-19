@@ -17,6 +17,7 @@ from planner.agents.parser import parse_day
 from planner.agents.preferences import (
     PreferencesResponse,
     find_candidates,
+    recall_preferences,
     store_preferences,
 )
 from planner.agents.state import PlannerState
@@ -190,7 +191,14 @@ def build_graph(
     def critic_node(state: PlannerState) -> dict:
         # la chiamata all'LLM sta in un nodo senza interrupt: alla ripresa un nodo riparte
         # dall'inizio, e con l'interrupt qui rifarebbe la chiamata (lenta, e forse diversa)
-        return {"critique": critique(state["schedule"], state["day"], client)}
+        # con la memoria: le preferenze più vicine ai task, il Critico sceglie quelle che valgono
+        recalled = []
+        if remember:
+            recalled = recall_preferences(list(state["sources"].values()), embedder, preferences)
+        # la data scelta nel calendario: il Critico riceve il giorno della settimana
+        day_date = state.get("day_date")
+        review = critique(state["schedule"], state["day"], client, recalled, day_date)
+        return {"critique": review}
 
     def suggest_activities(state: PlannerState) -> dict:
         # risposta sempre con un campo: Command(resume={}) non riprende il grafo

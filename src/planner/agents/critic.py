@@ -1,7 +1,10 @@
+from collections.abc import Sequence
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from planner.dates import long_italian_date
 from planner.llm.base import LLMClient
 from planner.solver.models import DayConfig, Interval, Schedule, fmt_time
 
@@ -44,10 +47,12 @@ class CriticReview(BaseModel):
     """The critic's answer.
 
     Field order matters: the LLM writes the fields in schema order, so it describes
-    the day (assessment) before deciding (too_empty) and only then proposes activities.
+    the day (assessment), picks the user's preferences that apply to it, decides
+    (too_empty) and only then proposes activities.
     """
 
     assessment: str = Field(min_length=1)
+    applied_preferences: list[str] = Field(default_factory=list)
     too_empty: bool
     suggestions: list[Suggestion] = Field(default_factory=list, max_length=MAX_SUGGESTIONS)
 
@@ -68,6 +73,10 @@ Compila i campi in quest'ordine:
 - assessment: una o due frasi che descrivono la giornata usando solo i dati ricevuti: \
 quante ore sono occupate su quelle totali e qual è l'intervallo libero più lungo. \
 Non nominare impegni che non sono nel piano.
+- applied_preferences: se ricevi delle PREFERENZE DELL'UTENTE, copia parola per parola \
+solo quelle che riguardano gli impegni o il tempo libero di questa giornata; una preferenza \
+legata a un giorno della settimana vale solo se coincide con il Giorno ricevuto. Lista vuota \
+se nessuna riguarda questa giornata o se non ne ricevi.
 - too_empty: true se la giornata ti sembra troppo vuota e varrebbe la pena aggiungere qualcosa; \
 false se è già abbastanza piena o equilibrata.
 - suggestions: solo se too_empty è true, da 1 a 3 attività da aggiungere; altrimenti lista vuota.
@@ -78,6 +87,7 @@ false se è già abbastanza piena o equilibrata.
   - reason: una frase sul perché è utile in questa giornata
   Varia le categorie e tieni conto di quello che c'è già nel piano: per esempio, \
 niente altro studio se la giornata è già piena di studio.
+  Non proporre niente che vada contro le preferenze in applied_preferences.
 
 Usa gli intervalli liberi così come sono, senza ricalcolarli."""
 
@@ -107,13 +117,23 @@ def day_facts(slots: list[Interval], day: DayConfig) -> dict:
     }
 
 
-def critic_messages(plan: Schedule, slots: list[Interval], day: DayConfig) -> list[dict]:
+def critic_messages(
+    plan: Schedule,
+    slots: list[Interval],
+    day: DayConfig,
+    preferences: Sequence[str] = (),
+    day_date: date | None = None,
+) -> list[dict]:
     """The prompt for the critic: the plan and the facts about free time, computed in Python.
 
     Busy time and the longest slot are spelled out: a 7B model misjudges them if it has
     to work them out from the list (it called a day with one meeting "very busy").
+    The user's preferences, if any, are added at the end: the critic picks the ones that apply.
+    The weekday comes from the date chosen in the calendar, computed in Python: preferences
+    such as "no meetings on Friday" need it, and the model should not guess it.
     """
-    lines = ["Piano:"]
+    lines = [f"Giorno: {long_italian_date(day_date)}"] if day_date else []
+    lines.append("Piano:")
     items = sorted(plan.scheduled, key=lambda item: item.start_min)
     lines += [f"- {fmt_time(i.start_min)}-{fmt_time(i.end_min)} {i.title}" for i in items]
     if not items:
@@ -134,6 +154,9 @@ def critic_messages(plan: Schedule, slots: list[Interval], day: DayConfig) -> li
     if facts["longest_slot"]:
         longest = facts["longest_slot"]
         lines.append(f"Intervallo libero più lungo: {longest['start']}-{longest['end']}")
+    if preferences:
+        lines.append("Preferenze dell'utente:")
+        lines += [f"- {text}" for text in preferences]
 
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -164,13 +187,31 @@ def check_suggestions(
     return valid, warnings
 
 
-def critique(plan: Schedule, day: DayConfig, client: LLMClient) -> dict:
-    """Ask the critic about the plan; returns plain JSON data for the state and the interface."""
+def critique(
+    plan: Schedule,
+    day: DayConfig,
+    client: LLMClient,
+    preferences: Sequence[str] = (),
+    day_date: date | None = None,
+) -> dict:
+    """Ask the critic about the plan; returns plain JSON data for the state and the interface.
+
+    applied_preferences keeps only preferences that were really given: a made-up one
+    would be shown to the user as if it came from the memory.
+    """
     slots = free_slots(plan, day)
-    review = client.generate(critic_messages(plan, slots, day), CriticReview)
+    review = client.generate(critic_messages(plan, slots, day, preferences, day_date), CriticReview)
     suggestions, warnings = check_suggestions(review, slots)
+    given = {text.strip().lower(): text for text in preferences}
+    applied = [
+        given[t.strip().lower()] for t in review.applied_preferences if t.strip().lower() in given
+    ]
     return {
         "assessment": review.assessment,  # opinione del modello
+        # le preferenze date al Critico: è questo che l'interfaccia mostra ("considerate");
+        # l'elenco di quelle applicate secondo il modello non è affidabile (vedi TODO)
+        "recalled_preferences": list(preferences),
+        "applied_preferences": list(dict.fromkeys(applied)),  # senza doppioni, in ordine
         "too_empty": review.too_empty,
         **day_facts(slots, day),  # fatti calcolati: l'interfaccia li mostra come dati
         "suggestions": [s.model_dump(mode="json") for s in suggestions],

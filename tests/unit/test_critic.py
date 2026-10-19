@@ -1,4 +1,5 @@
 import json
+from datetime import date
 
 import pytest
 from pydantic import ValidationError
@@ -118,13 +119,11 @@ def review(too_empty: bool, *suggestions: dict) -> CriticReview:
 
 
 def test_reasoning_comes_before_the_decision_in_the_schema():
-    # l'LLM genera i campi in quest'ordine: prima descrive, poi decide, poi propone
-    assert list(CriticReview.model_fields) == ["assessment", "too_empty", "suggestions"]
-    assert list(CriticReview.model_json_schema()["properties"]) == [
-        "assessment",
-        "too_empty",
-        "suggestions",
-    ]
+    # l'LLM genera i campi in quest'ordine: descrive, sceglie le preferenze che valgono,
+    # poi decide e propone
+    order = ["assessment", "applied_preferences", "too_empty", "suggestions"]
+    assert list(CriticReview.model_fields) == order
+    assert list(CriticReview.model_json_schema()["properties"]) == order
 
 
 def test_messages_contain_the_plan_and_the_computed_free_slots():
@@ -208,3 +207,59 @@ def test_critique_asks_the_llm_and_returns_plain_data():
     assert [s["title"] for s in result["suggestions"]] == ["Corsa"]  # Film non entra
     assert len(result["warnings"]) == 1
     assert json.loads(json.dumps(result)) == result
+
+
+def test_preferences_are_added_to_the_prompt_only_when_given():
+    plan = plan_of((540, 660))
+    slots = free_slots(plan, DAY)
+
+    _, without = critic_messages(plan, slots, DAY)
+    _, with_prefs = critic_messages(plan, slots, DAY, ["preferisce studiare la mattina"])
+
+    assert "Preferenze" not in without["content"]
+    assert with_prefs["content"].splitlines()[-2:] == [
+        "Preferenze dell'utente:",
+        "- preferisce studiare la mattina",
+    ]
+
+
+def test_only_given_preferences_can_be_applied():
+    answer = {
+        "assessment": "Giornata piena.",
+        # una data (con maiuscole diverse), una inventata, una ripetuta
+        "applied_preferences": [
+            "Preferisce studiare la mattina",
+            "ama la pizza",
+            "preferisce studiare la mattina",
+        ],
+        "too_empty": False,
+        "suggestions": [],
+    }
+    client = FakeClient([json.dumps(answer)])
+    given = ["preferisce studiare la mattina", "fa la spesa il sabato"]
+
+    result = critique(plan_of((540, 660)), DAY, client, given)
+
+    assert result["applied_preferences"] == ["preferisce studiare la mattina"]
+    assert "fa la spesa il sabato" in client.calls[0][1]["content"]
+
+
+def test_weekday_from_the_calendar_is_the_first_line_of_the_prompt():
+    plan = plan_of((540, 660))
+    slots = free_slots(plan, DAY)
+
+    _, without = critic_messages(plan, slots, DAY)
+    _, with_day = critic_messages(plan, slots, DAY, day_date=date(2026, 10, 23))
+
+    assert without["content"].startswith("Piano:")
+    assert with_day["content"].splitlines()[:2] == ["Giorno: venerdì 23 ottobre 2026", "Piano:"]
+
+
+def test_critique_returns_the_preferences_it_was_given():
+    answer = {"assessment": "ok", "applied_preferences": [], "too_empty": False, "suggestions": []}
+    given = ["preferisce studiare la mattina", "fa la spesa il sabato"]
+
+    result = critique(plan_of((540, 660)), DAY, FakeClient([json.dumps(answer)]), given)
+
+    # "considerate" nell'interfaccia: quelle date, anche se il modello non ne elenca nessuna
+    assert result["recalled_preferences"] == given

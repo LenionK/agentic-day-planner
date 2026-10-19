@@ -10,6 +10,7 @@ from planner.agents.preferences import (
     SameVerdict,
     extract_preferences,
     find_candidates,
+    recall_preferences,
     same_preference,
     store_preferences,
 )
@@ -207,3 +208,38 @@ def test_store_with_nothing_kept_saves_nothing():
     assert repository.texts() == []
     assert result["message"] == ""
     assert embedder.calls == []  # niente da salvare: nessun embedding
+
+
+# --- recupero ------------------------------------------------------------------------
+
+
+def test_recall_returns_the_closest_preferences_across_tasks_best_first():
+    repository = FakePreferenceRepository()
+    repository.add("preferisce studiare la mattina", "x", unit(1))
+    repository.add("preferisce la palestra la sera", "x", unit(2))
+    repository.add("fa la spesa il sabato", "x", unit(3))
+    repository.add("legge prima di dormire", "x", unit(4))
+    embedder = FakeEmbedder(
+        {
+            "devo studiare 2 ore": near(1, 9, 0.9),  # vicina allo studio
+            "palestra un'ora": near(2, 9, 0.8),  # vicina alla palestra
+            "dentista alle 15": near(3, 9, 0.3),  # poco vicina alla spesa
+        }
+    )
+
+    recalled = recall_preferences(
+        ["devo studiare 2 ore", "palestra un'ora", "dentista alle 15"], embedder, repository
+    )
+
+    assert recalled == [
+        "preferisce studiare la mattina",
+        "preferisce la palestra la sera",
+        "fa la spesa il sabato",
+    ]
+    # i task si cercano con il loro source, come documenti
+    assert embedder.calls[0][0] == "search_document: devo studiare 2 ore"
+
+
+def test_recall_with_no_tasks_or_no_memory_is_empty():
+    assert recall_preferences([], FakeEmbedder(), FakePreferenceRepository()) == []
+    assert recall_preferences(["studio"], FakeEmbedder(), FakePreferenceRepository()) == []

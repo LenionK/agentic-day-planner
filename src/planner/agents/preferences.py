@@ -214,3 +214,31 @@ def store_preferences(
         parts.append(f"cancellate {deleted}")
     message = f"Preferenze: {', '.join(parts)}." if parts else ""
     return {"saved": len(to_save), "seen_again": seen_again, "deleted": deleted, "message": message}
+
+
+# quante preferenze dare al Critico: le più simili alle frasi dei task, senza soglia.
+# Una soglia non separa le pertinenti dalle altre (misurato con titoli e source, query e
+# document): il vettore ordina, il Critico decide quali valgono davvero
+RECALL_LIMIT = 3
+ANY_SIMILARITY = -1.0  # il coseno sta tra -1 e 1: nessuna esclusa, decide l'ordine
+
+
+def recall_preferences(
+    sources: list[str],
+    embedder: Embedder,
+    repository: PreferenceRepository,
+    limit: int = RECALL_LIMIT,
+) -> list[str]:
+    """The saved preferences closest to the day's tasks, the closest first.
+
+    The tasks are searched by their source (the user's words, more context than a title),
+    embedded as documents like the preferences: the best combination measured.
+    Each preference counts with its best similarity to any task.
+    """
+    best: dict[int, tuple[float, str]] = {}
+    for vector in embedder.embed(sources, "document"):
+        for pref in repository.similar(vector, ANY_SIMILARITY):
+            if pref.id not in best or pref.similarity > best[pref.id][0]:
+                best[pref.id] = (pref.similarity, pref.text)
+    ranked = sorted(best.values(), reverse=True)
+    return [text for _, text in ranked[:limit]]

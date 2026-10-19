@@ -36,12 +36,14 @@
   - [x] tabella `preferences` (revisione 0005, un solo vettore `embedding`, nessun legame con le giornate)
   - [x] nel grafo dopo `save_plan`: estrazione → candidate (vettori + giudice) → conferma dell'utente (solo preferenze nuove) → salvataggio
   - [x] finestra "🧠 Preferenze" accanto allo Storico: elenco ed eliminazione
-  - [ ] recupero: le preferenze pertinenti nel Critico e nella conferma dei task
+  - [x] recupero: le 3 preferenze più simili ai `source` dei task (come document, senza soglia) date al Critico, che sceglie quelle pertinenti (`applied_preferences`)
 - [ ] API FastAPI ed export `.ics`
 - [ ] Eval dei modelli (Qwen2.5 7B, Phi-4 mini, Llama 3.1 8B, Aya Expanse 8B) sulla GTX 1060
 - [ ] CI con GitHub Actions, AWS con LocalStack e CDK
 
 ## Estensioni
+- [ ] **Rivedere la ricerca tramite vettori.** Con i task una soglia di similarità non separa le preferenze pertinenti dalle altre: misurate 6 combinazioni (titolo, `source`, titolo + `source`; query e document), nessuna separa; la migliore (`source` come document) mette la preferenza giusta al primo posto 7 volte su 8. Da provare: un modello di embedding multilingue più grande, una frase di ricerca costruita dall'LLM, più dati reali per misurare. Oggi: le 3 più simili, decide il Critico.
+- [ ] **`applied_preferences` affidabile:** il Critico a volte elenca tutte le preferenze ricevute, a volte nessuna anche quando ne usa una nelle proposte; con il giorno della settimana nel prompt, una riunione di venerdì alle 15 non fa applicare "evita riunioni il venerdì pomeriggio". Per questo l'interfaccia mostra le preferenze considerate (quelle date al Critico), non le applicate. Da misurare su giornate di prova.
 - [ ] **Funzione `frequent_tasks(n)`** nel database: task più frequenti, durata media, orario medio di inizio; da mostrare nello Storico.
 - [ ] **Proposte del Critico nel piano:** le proposte accettate (`{"accepted": [...]}`) diventano `Task` con id nuovi, priorità bassa e non obbligatori, si aggiungono ai task e tornano allo scheduler; un campo nello stato fa girare il Critico una sola volta (altrimenti dopo lo scheduler si torna al Critico all'infinito). Interfaccia: una casella per proposta e "Aggiungi e ripianifica".
 - [ ] **Valutazione del Critico** su giornate di prova (piene, vuote, a metà) con il giudizio atteso, anche con l'ordine dei campi invertito per misurare l'effetto del ragionamento prima della decisione.

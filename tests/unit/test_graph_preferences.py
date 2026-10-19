@@ -154,3 +154,49 @@ def test_without_embedder_the_graph_ends_after_saving():
 
     assert final["save_result"]["saved"] is True
     assert "preference_candidates" not in final
+
+
+def test_critic_receives_the_recalled_preferences_and_reports_the_applied_ones():
+    memory = FakePreferenceRepository()
+    memory.add(MORNING, "la mattina", unit(1))
+    critic_answer = json.dumps(
+        {
+            "assessment": "Va bene.",
+            "applied_preferences": [MORNING],
+            "too_empty": False,
+            "suggestions": [],
+        }
+    )
+    client = FakeClient([PARSED, critic_answer, extracted()])
+    graph = build_graph(
+        client,
+        checkpointer=InMemorySaver(),
+        repository=FakePlanRepository(),
+        embedder=FakeEmbedder({"studio 2 ore": unit(1)}),  # il source del task studio
+        preferences=memory,
+    )
+    config = {"configurable": {"thread_id": "t"}}
+    graph.invoke({"user_input": SENTENCE, "day": DAY, "day_date": date(2026, 10, 25)}, config)
+
+    final = graph.invoke(Command(resume={"edits": {}}), config)
+
+    critic_prompt = client.calls[1][1]["content"]
+    assert f"Preferenze dell'utente:\n- {MORNING}" in critic_prompt
+    assert final["critique"]["applied_preferences"] == [MORNING]
+
+
+def test_critic_gets_the_weekday_of_the_date_chosen_in_the_calendar():
+    client = FakeClient([PARSED, DAY_IS_FINE, extracted()])
+    graph = build_graph(
+        client,
+        checkpointer=InMemorySaver(),
+        repository=FakePlanRepository(),
+        embedder=FakeEmbedder(),
+        preferences=FakePreferenceRepository(),
+    )
+    config = {"configurable": {"thread_id": "t"}}
+    graph.invoke({"user_input": SENTENCE, "day": DAY, "day_date": date(2026, 10, 25)}, config)
+
+    graph.invoke(Command(resume={"edits": {}}), config)
+
+    assert client.calls[1][1]["content"].startswith("Giorno: domenica 25 ottobre 2026")

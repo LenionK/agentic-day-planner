@@ -30,6 +30,7 @@ from planner.agents.approval import (
 from planner.agents.critic import duration_text
 from planner.agents.graph import all_warnings, build_graph
 from planner.config import Settings
+from planner.dates import long_italian_date
 from planner.db.repository import PostgresPlanRepository, PostgresPreferenceRepository
 from planner.llm.factory import build_embedder, build_llm_client
 from planner.solver.models import DayConfig, fmt_time
@@ -291,6 +292,11 @@ def show_critique(critique: dict) -> None:
     )
     st.caption("Commento del Critico")
     st.info(critique["assessment"])
+    # le preferenze date al Critico (le più vicine ai task): vero per costruzione.
+    # Quali abbia applicato davvero il modello non è affidabile, quindi non si mostra
+    considered = critique.get("recalled_preferences", [])
+    if considered:
+        st.caption("🧠 Preferenze considerate: " + "; ".join(considered))
 
 
 def show_suggestions(critique: dict) -> None:
@@ -381,31 +387,6 @@ def show_final(result: dict) -> None:
 
 
 # nomi italiani scritti a mano: strftime("%A") dipende dalla lingua del sistema
-WEEKDAYS = {
-    1: "lunedì",
-    2: "martedì",
-    3: "mercoledì",
-    4: "giovedì",
-    5: "venerdì",
-    6: "sabato",
-    7: "domenica",
-}
-MONTHS = [
-    "gennaio",
-    "febbraio",
-    "marzo",
-    "aprile",
-    "maggio",
-    "giugno",
-    "luglio",
-    "agosto",
-    "settembre",
-    "ottobre",
-    "novembre",
-    "dicembre",
-]
-
-
 @st.dialog("Preferenze ricordate", width="large")
 def show_preferences() -> None:
     """The remembered preferences, each with a button to delete it.
@@ -462,10 +443,7 @@ def show_history() -> None:
     for d in days:
         day = d.day_date
         free = d.day_minutes - d.busy_minutes
-        st.markdown(
-            f"**{WEEKDAYS[d.weekday]} {day.day} {MONTHS[day.month - 1]} {day.year}**"
-            f" · tempo libero {duration_text(free)}"
-        )
+        st.markdown(f"**{long_italian_date(day)}** · tempo libero {duration_text(free)}")
         st.caption(f"«{d.user_input}»")
         plan = plans.get(day, [])
         if plan:
