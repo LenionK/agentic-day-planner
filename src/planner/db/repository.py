@@ -9,8 +9,16 @@ from typing import Protocol
 
 import psycopg
 
-from planner.db.store import SavedDay, load_day, replace_day, save_day
-from planner.solver.models import DayConfig, Schedule, Task
+from planner.db.store import (
+    DaySummary,
+    SavedDay,
+    day_summaries,
+    load_day,
+    replace_day,
+    save_day,
+    scheduled_by_day,
+)
+from planner.solver.models import DayConfig, Schedule, ScheduledTask, Task
 
 
 class DayAlreadySaved(Exception):
@@ -49,6 +57,16 @@ class PostgresPlanRepository:
     def load(self, day_date: date) -> SavedDay | None:
         with psycopg.connect(self.conninfo) as conn:
             return load_day(conn, day_date)
+
+    def history(self) -> list[DaySummary]:
+        """Saved days, most recent first. For the interface: the graph does not need it."""
+        with psycopg.connect(self.conninfo) as conn:
+            return day_summaries(conn)
+
+    def history_plans(self) -> dict[date, list[ScheduledTask]]:
+        """The plan of every saved day, for the history in the interface."""
+        with psycopg.connect(self.conninfo) as conn:
+            return scheduled_by_day(conn)
 
     def save(
         self,

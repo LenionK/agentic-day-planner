@@ -330,9 +330,81 @@ def show_final(result: dict) -> None:
     show_save_result(result.get("save_result"))
 
 
-st.title("Agentic day planner")
+# nomi italiani scritti a mano: strftime("%A") dipende dalla lingua del sistema
+WEEKDAYS = {
+    1: "lunedì",
+    2: "martedì",
+    3: "mercoledì",
+    4: "giovedì",
+    5: "venerdì",
+    6: "sabato",
+    7: "domenica",
+}
+MONTHS = [
+    "gennaio",
+    "febbraio",
+    "marzo",
+    "aprile",
+    "maggio",
+    "giugno",
+    "luglio",
+    "agosto",
+    "settembre",
+    "ottobre",
+    "novembre",
+    "dicembre",
+]
+
+
+@st.dialog("Storico", width="large")
+def show_history() -> None:
+    """Saved days in a pop-up: for each day a header and its plan as a table.
+
+    A function decorated with st.dialog opens as a modal when called; it closes
+    with the X, with Esc or by clicking outside. The totals come from the
+    day_summary view, the plans from one query for all days.
+    """
+    repository = get_repository()
+    try:
+        days = repository.history()
+        plans = repository.history_plans()
+    except psycopg.OperationalError:
+        st.error("Database non raggiungibile.")
+        return
+    if not days:
+        st.info("Nessuna giornata salvata.")
+        return
+    for d in days:
+        day = d.day_date
+        free = d.day_minutes - d.busy_minutes
+        st.markdown(
+            f"**{WEEKDAYS[d.weekday]} {day.day} {MONTHS[day.month - 1]} {day.year}**"
+            f" · tempo libero {duration_text(free)}"
+        )
+        st.caption(f"«{d.user_input}»")
+        plan = plans.get(day, [])
+        if plan:
+            st.dataframe(
+                [
+                    {"Dalle": fmt_time(s.start_min), "Alle": fmt_time(s.end_min), "Task": s.title}
+                    for s in plan
+                ],
+                hide_index=True,
+            )
+        else:
+            st.info("Nessun task nel piano.")
+
+
+# intestazione: titolo a sinistra, Storico sulla stessa riga a destra,
+# dove stanno le azioni che valgono per tutta l'app
+title_column, action_column = st.columns([4, 1], vertical_alignment="center")
+title_column.title("Agentic day planner")
 if get_repository() is None:
     st.warning("Database non raggiungibile: i piani non verranno salvati. Avvia Docker.")
+else:
+    actions = action_column.container(horizontal=True, horizontal_alignment="right")
+    if actions.button("📅 Storico"):
+        show_history()  # apre la finestra; senza database il bottone non c'è
 
 # in un form Invio equivale al bottone; text_input perché in text_area Invio va a capo
 with st.form("sentence"):

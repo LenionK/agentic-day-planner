@@ -8,7 +8,7 @@ values travel apart from the SQL, so the user's sentence is never run as SQL.
 from datetime import date
 
 import psycopg
-from psycopg.rows import dict_row
+from psycopg.rows import class_row, dict_row
 from pydantic import BaseModel
 
 from planner.solver.models import DayConfig, Schedule, ScheduledTask, Task
@@ -164,3 +164,51 @@ def load_day(conn: psycopg.Connection, day_date: date) -> SavedDay | None:
         sources=sources,
         scheduled=sorted(scheduled, key=lambda item: item.start_min),
     )
+
+
+class DaySummary(BaseModel):
+    """One row of the day_summary view: how full a saved day is."""
+
+    id: int
+    day_date: date
+    weekday: int  # 1 = lunedì ... 7 = domenica
+    user_input: str
+    day_minutes: int
+    task_count: int
+    required_count: int
+    busy_minutes: int
+    busy_percent: int
+    first_start_min: int | None  # None se la giornata non ha task
+    last_end_min: int | None
+
+
+def day_summaries(conn: psycopg.Connection) -> list[DaySummary]:
+    """All saved days, most recent first, as computed by the day_summary view."""
+    # class_row: ogni riga diventa direttamente un DaySummary, campo per colonna
+    with conn.cursor(row_factory=class_row(DaySummary)) as cur:
+        cur.execute("SELECT * FROM day_summary ORDER BY day_date DESC")
+        return cur.fetchall()
+
+
+def scheduled_by_day(conn: psycopg.Connection) -> dict[date, list[ScheduledTask]]:
+    """The plan of every saved day, in time order: one query for all days, not one per day."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            SELECT d.day_date, t.task_key, t.title, t.scheduled_start_min, t.scheduled_end_min
+            FROM days d JOIN tasks t ON t.day_id = d.id
+            WHERE t.scheduled_start_min IS NOT NULL
+            ORDER BY d.day_date DESC, t.scheduled_start_min
+            """
+        )
+        plans: dict[date, list[ScheduledTask]] = {}
+        for row in cur:
+            plans.setdefault(row["day_date"], []).append(
+                ScheduledTask(
+                    task_id=row["task_key"],
+                    title=row["title"],
+                    start_min=row["scheduled_start_min"],
+                    end_min=row["scheduled_end_min"],
+                )
+            )
+        return plans

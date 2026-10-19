@@ -28,7 +28,9 @@
   - [x] salvataggio nel grafo: `check_saved_day` subito dopo il parser, `save_plan` alla fine senza altre domande; archivio iniettato con un `Protocol`
   - [x] unione: se la data ha già un piano, i suoi task si uniscono ai nuovi, bloccati al loro orario (solo per il solver); il Critico valuta la giornata intera; "Sostituisci il piano salvato" nella conferma
   - [x] interfaccia: selettore della data, "Già in agenda" nella conferma, un solo bottone di conferma, esito del salvataggio
-  - [ ] view e stored procedure (statistiche sulle giornate passate); storico nell'interfaccia
+  - [x] view `day_summary` (revisione 0003): per giornata task, obbligatori, minuti e percentuale occupati; "Storico" nella barra laterale
+  - [ ] funzione `frequent_tasks(n)`: task più frequenti, durata media, orario medio (base per la memoria)
+  - [ ] procedura `purge_days_before(data)` con `CALL`
 - [ ] Memoria con pgvector (preferenze e giornate passate)
 - [ ] API FastAPI ed export `.ics`
 - [ ] Eval dei modelli (Qwen2.5 7B, Phi-4 mini, Llama 3.1 8B, Aya Expanse 8B) sulla GTX 1060

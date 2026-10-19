@@ -8,7 +8,7 @@ from datetime import date
 import psycopg
 import pytest
 
-from planner.db.store import load_day, replace_day, save_day
+from planner.db.store import day_summaries, load_day, replace_day, save_day, scheduled_by_day
 from planner.solver.models import DayConfig, Schedule, ScheduledTask, Task
 
 DAY_DATE = date(2026, 10, 20)
@@ -165,3 +165,36 @@ def test_failed_replace_keeps_the_old_day(db):
 
     # cancellazione e inserimento nella stessa transazione: la vecchia giornata è ancora lì
     assert load_day(db, DAY_DATE).tasks == TASKS
+
+
+def test_day_summary_counts_busy_time_and_keeps_days_without_tasks(db):
+    # 07:00-20:00 = 780 minuti; nel piano studio (120) e dentista (60): 180 minuti, 23%
+    save(db)
+    save(db, day_date=date(2026, 10, 18), tasks=[], plan=Schedule(status="OPTIMAL"), sources={})
+
+    summaries = day_summaries(db)
+
+    assert [s.day_date for s in summaries] == [DAY_DATE, date(2026, 10, 18)]  # recenti prima
+    full, empty = summaries
+    assert full.weekday == 2  # 20 ottobre 2026: martedì
+    assert (full.task_count, full.required_count) == (3, 1)
+    assert (full.day_minutes, full.busy_minutes, full.busy_percent) == (780, 180, 23)
+    assert (full.first_start_min, full.last_end_min) == (480, 960)
+    # LEFT JOIN: la giornata senza task c'è, con zeri e nessun orario
+    assert (empty.task_count, empty.busy_minutes, empty.busy_percent) == (0, 0, 0)
+    assert empty.first_start_min is None
+
+
+def test_day_summary_is_empty_without_saved_days(db):
+    assert day_summaries(db) == []
+
+
+def test_scheduled_by_day_returns_each_plan_in_time_order(db):
+    save(db)  # 20/10: studio 8-10, dentista 15-16 (la spesa non è nel piano)
+    save(db, day_date=date(2026, 10, 21), tasks=NEW_TASKS, plan=NEW_PLAN, sources={})
+
+    plans = scheduled_by_day(db)
+
+    assert list(plans) == [date(2026, 10, 21), DAY_DATE]  # recenti prima
+    assert [(s.title, s.start_min) for s in plans[DAY_DATE]] == [("Studio", 480), ("Dentista", 900)]
+    assert [s.title for s in plans[date(2026, 10, 21)]] == ["Palestra"]
