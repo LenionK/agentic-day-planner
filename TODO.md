@@ -33,9 +33,9 @@
 - [ ] Memoria delle preferenze con pgvector
   - [x] `Embedder` (Ollama, `nomic-embed-text`, prefissi document / query) e misura delle similarità (`tests/eval/run_embeddings.py`)
   - [x] estrazione delle preferenze (source → cue → text) e giudice dei duplicati, misurati su set di sviluppo e di verifica (`tests/eval/run_preferences.py`)
-  - [x] tabella `preferences` (revisione 0005, nessun legame con le giornate); revisione 0006: un solo vettore `embedding`
+  - [x] tabella `preferences` (revisione 0005, un solo vettore `embedding`, nessun legame con le giornate)
   - [x] nel grafo dopo `save_plan`: estrazione → candidate (vettori + giudice) → conferma dell'utente (solo preferenze nuove) → salvataggio
-  - [ ] finestra "🧠 Preferenze": elenco ed eliminazione
+  - [x] finestra "🧠 Preferenze" accanto allo Storico: elenco ed eliminazione
   - [ ] recupero: le preferenze pertinenti nel Critico e nella conferma dei task
 - [ ] API FastAPI ed export `.ics`
 - [ ] Eval dei modelli (Qwen2.5 7B, Phi-4 mini, Llama 3.1 8B, Aya Expanse 8B) sulla GTX 1060

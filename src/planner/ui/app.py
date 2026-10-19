@@ -78,18 +78,21 @@ def purge_on_startup() -> int:
 
 
 @st.cache_resource
+def get_preferences() -> PostgresPreferenceRepository | None:
+    """The preference memory: only with the database."""
+    repository = get_repository()
+    return PostgresPreferenceRepository(repository.conninfo) if repository else None
+
+
+@st.cache_resource
 def get_graph():
     """Created once per server: a new InMemorySaver would forget the paused graphs."""
-    client = build_llm_client(Settings())
-    repository = get_repository()
-    # memoria delle preferenze solo con il database: si salvano dopo il piano
-    preferences = PostgresPreferenceRepository(repository.conninfo) if repository else None
     return build_graph(
-        client,
+        build_llm_client(Settings()),
         checkpointer=InMemorySaver(),
-        repository=repository,
+        repository=get_repository(),
         embedder=build_embedder(Settings()),
-        preferences=preferences,
+        preferences=get_preferences(),
     )
 
 
@@ -403,6 +406,41 @@ MONTHS = [
 ]
 
 
+@st.dialog("Preferenze ricordate", width="large")
+def show_preferences() -> None:
+    """The remembered preferences, each with a button to delete it.
+
+    A click inside a dialog reruns only the dialog function (a fragment): the delete
+    button uses a callback, so the deletion happens before the list is drawn again.
+    """
+    try:
+        preferences = get_preferences().all()
+    except psycopg.OperationalError:
+        st.error("Database non raggiungibile.")
+        return
+    if not preferences:
+        st.info("Nessuna preferenza ricordata: nascono dalle frasi delle giornate salvate.")
+        return
+    st.caption("Le userò per le prossime giornate. Elimina quelle che non valgono più.")
+    for pref in preferences:
+        with st.container(border=True):
+            text_column, button_column = st.columns([5, 1], vertical_alignment="center")
+            text_column.markdown(f"**{pref.text}**")
+            times = "1 volta" if pref.times_seen == 1 else f"{pref.times_seen} volte"
+            text_column.caption(
+                f"Vista {times} · ultima il {pref.last_seen:%d/%m/%Y} · «{pref.source}»"
+            )
+            # on_click: Streamlit chiama delete PRIMA della riesecuzione, qualunque parte venga
+            # rieseguita (solo la finestra nel browser, tutta l'app nei test): l'elenco che
+            # segue è già senza la preferenza cancellata
+            button_column.button(
+                "Elimina",
+                key=f"delete-pref-{pref.id}",
+                on_click=get_preferences().delete,
+                args=(pref.id,),
+            )
+
+
 @st.dialog("Storico", width="large")
 def show_history() -> None:
     """Saved days in a pop-up: for each day a header and its plan as a table.
@@ -456,8 +494,11 @@ else:
         st.toast(f"Cancellate {days} più vecchie di 2 settimane.", icon="🧹")
         st.session_state.purge_shown = True
     actions = action_column.container(horizontal=True, horizontal_alignment="right")
+    # aprono le finestre; senza database i bottoni non ci sono
     if actions.button("📅 Storico"):
-        show_history()  # apre la finestra; senza database il bottone non c'è
+        show_history()
+    if actions.button("🧠 Preferenze"):
+        show_preferences()
 
 # in un form Invio equivale al bottone; text_input perché in text_area Invio va a capo
 with st.form("sentence"):
