@@ -184,14 +184,19 @@ def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository
         user_input = (
             f"{saved['user_input']} · {state['user_input']}" if merged else state["user_input"]
         )
+        # si salva solo ciò che è nel piano: i task rimasti fuori non entrano nel database
+        in_plan = {item.task_id for item in state["schedule"].scheduled}
+        tasks = [task for task in state["tasks"] if task.id in in_plan]
+        sources = {key: text for key, text in state["sources"].items() if key in in_plan}
+        left_out = [task.title for task in state["tasks"] if task.id not in in_plan]
         try:
             day_id = repository.save(
                 state["day_date"],
                 user_input,
                 state["day"],
-                state["tasks"],
+                tasks,
                 state["schedule"],
-                state["sources"],
+                sources,
                 replace=replace,
             )
         except DayAlreadySaved:
@@ -203,6 +208,8 @@ def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository
             message = "Piano salvato al posto di quello precedente."
         else:
             message = "Piano salvato."
+        if left_out:  # mai in silenzio: l'utente sa cosa non è stato salvato
+            message += f" Non salvati perché fuori dal piano: {', '.join(left_out)}."
         return {"save_result": {"saved": True, "day_id": day_id, "message": message}}
 
     # senza archivio niente controllo né salvataggio: il grafo è quello di prima

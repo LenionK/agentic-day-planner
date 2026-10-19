@@ -162,6 +162,25 @@ def test_new_task_that_does_not_fit_goes_to_review_and_saved_task_stays():
     assert review.value["scheduled"] == [{"title": "Palestra", "start": "16:00", "end": "17:00"}]
 
 
+def test_tasks_left_out_of_the_plan_are_not_saved_and_the_message_says_so():
+    repository = FakePlanRepository()
+    two = parsed(
+        {"title": "Studio", "duration_min": 120, "priority": 5},
+        {"title": "Progetto", "duration_min": 540, "priority": 1},  # con lo studio non entra
+    )
+    graph, config, _, _ = start(repository, "esclusi", two)
+    confirm(graph, config)  # revisione: il progetto non entra
+
+    final = graph.invoke(Command(resume={"accept": True}), config)
+
+    saved = repository.days[DAY_DATE]
+    assert [t.title for t in saved.tasks] == ["Studio"]
+    assert set(saved.sources) == {"t1"}
+    assert final["save_result"]["message"] == (
+        "Piano salvato. Non salvati perché fuori dal piano: Progetto."
+    )
+
+
 def test_date_saved_in_the_meantime_becomes_a_message_not_a_crash():
     repository = FakePlanRepository()
     repository.conflict_on_save = True
