@@ -19,21 +19,18 @@
 - [x] Interfaccia Streamlit (`src/planner/ui/app.py`): tabella modificabile (checkbox, menu 1–5, durata, selettore orari), invio con Invio, "Continua senza modifiche"
 - [x] Revisione del piano: secondo `interrupt` dopo lo scheduler e arco condizionale; "accetta" → fine, "modifica" → di nuovo la conferma dei task, già corretti
 - [x] Gestione dei conflitti, con instradamento dopo lo scheduler: tutto inserito → fine; task esclusi → revisione; obbligatori in conflitto → `resolve_conflict` (solo i task in conflitto, risposta nel formato delle correzioni) → editor → scheduler
+- [x] Critico della giornata (`agents/critic.py`): buchi liberi e fatti calcolati in Python; nodo `critic` con LLM (valutazione → vuota sì/no → proposte) e nodo `suggest_activities` con interrupt; proposte che non entrano in nessun buco scartate con avviso; nell'interfaccia piano, fatti come dati e commento come opinione
 
 ## Prossimi passi
-- [ ] **Critico della giornata** (`agents/critic.py`): valuta il piano finito e, se la giornata gli sembra troppo vuota, propone attività
-  - [x] buchi liberi calcolati in Python (fatti per il prompt e controllo delle proposte)
-  - [x] nodo `critic` con LLM (valutazione → vuota sì/no → proposte, in quest'ordine) e nodo `suggest_activities` con interrupt; proposte che non entrano in nessun buco scartate con avviso
-  - [ ] le proposte accettate diventano task e tornano allo scheduler; il Critico gira una sola volta
-  - [ ] interfaccia: scelta delle proposte (oggi solo visualizzazione e "Va bene così")
-  - [ ] valutazione del Critico su giornate di prova (piene, vuote, a metà), anche con l'ordine dei campi invertito
-- [ ] Database: tabelle, view e stored procedure; nodo `salva_piano` dopo la revisione ("accetta" → `salva_piano` → END)
+- [ ] Database: tabelle, view e stored procedure; nodo `salva_piano` prima di END (piano completo o accettato)
 - [ ] Memoria con pgvector (preferenze e giornate passate)
 - [ ] API FastAPI ed export `.ics`
 - [ ] Eval dei modelli (Qwen2.5 7B, Phi-4 mini, Llama 3.1 8B, Aya Expanse 8B) sulla GTX 1060
 - [ ] CI con GitHub Actions, AWS con LocalStack e CDK
 
 ## Estensioni
+- [ ] **Proposte del Critico nel piano:** le proposte accettate (`{"accepted": [...]}`) diventano `Task` con id nuovi, priorità bassa e non obbligatori, si aggiungono ai task e tornano allo scheduler; un campo nello stato fa girare il Critico una sola volta (altrimenti dopo lo scheduler si torna al Critico all'infinito). Interfaccia: una casella per proposta e "Aggiungi e ripianifica".
+- [ ] **Valutazione del Critico** su giornate di prova (piene, vuote, a metà) con il giudizio atteso, anche con l'ordine dei campi invertito per misurare l'effetto del ragionamento prima della decisione.
 - [ ] **Critico del parser:** controlli deterministici di ogni task rispetto al suo `source` ("13 ore" → 780 minuti, "se riesco" → priorità 1, "devo" → 5), con avvisi nella conferma; misurato con `run_eval.py` prima e dopo.
 - [ ] **Agente che modifica il piano a conversazione** ("sposta la palestra alle 19", "togli la spesa", "aggiungi mezz'ora di pausa dopo pranzo"). L'LLM sceglie quale tool usare:
   - aggiungi un task
