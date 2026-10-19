@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from planner.db.repository import DayAlreadySaved
 from planner.db.store import SavedDay
 from planner.llm.base import LLMClient
+from planner.llm.embedder import EMBED_DIM, Embedder
 from planner.solver.models import DayConfig, Schedule, Task
 
 
@@ -57,3 +58,35 @@ class FakePlanRepository:
             scheduled=sorted(plan.scheduled, key=lambda item: item.start_min),
         )
         return day_id
+
+
+class FakeEmbedder(Embedder):
+    """Returns the vectors chosen by the test and records the texts it receives (with prefix).
+
+    Texts not in `vectors` get `default`; `dim` can be changed to return vectors of the
+    wrong size, `extra` to return more vectors than texts.
+    """
+
+    def __init__(
+        self, vectors: dict[str, list[float]] | None = None, default: list[float] | None = None
+    ) -> None:
+        self.vectors = vectors or {}
+        self.default = default or unit(0)
+        self.calls: list[list[str]] = []
+        self.dim = EMBED_DIM
+        self.extra = 0
+
+    def _embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(list(texts))
+        result = []
+        for text in texts:
+            plain = text.split(": ", 1)[1]  # senza prefisso, per cercarlo in vectors
+            result.append(self.vectors.get(plain, self.default)[: self.dim])
+        return result + [self.default] * self.extra
+
+
+def unit(i: int, dim: int = EMBED_DIM) -> list[float]:
+    """A vector of length 1 along axis i: two different axes are unrelated (similarity 0)."""
+    vector = [0.0] * dim
+    vector[i] = 1.0
+    return vector

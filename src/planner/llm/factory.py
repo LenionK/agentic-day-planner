@@ -1,7 +1,9 @@
 from planner.config import Settings
 from planner.llm.base import LLMClient
+from planner.llm.embedder import Embedder
 from planner.llm.langchain_client import LangChainOllamaClient
 from planner.llm.ollama_client import OllamaClient
+from planner.llm.ollama_embedder import OllamaEmbedder
 
 
 def build_llm_client(settings: Settings) -> LLMClient:
@@ -25,3 +27,8 @@ def build_llm_client(settings: Settings) -> LLMClient:
         raise NotImplementedError("Groq client not implemented yet")
 
     raise ValueError(f"Unknown LLM provider: {settings.llm_provider}")
+
+
+def build_embedder(settings: Settings) -> Embedder:
+    """Create the embedder: the embedding model always runs on Ollama, whatever the LLM provider."""
+    return OllamaEmbedder(model=settings.embed_model, host=settings.ollama_host)
