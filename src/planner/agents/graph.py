@@ -2,9 +2,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from planner.agents.approval import (
-    EXISTING_DAY,
     SUGGEST_ACTIVITIES,
-    ExistingDayResponse,
     PlanReviewResponse,
     approval,
     conflict_summary,
@@ -13,6 +11,7 @@ from planner.agents.approval import (
 )
 from planner.agents.critic import SuggestionsResponse, critique
 from planner.agents.editor import ApprovalResponse, apply_edits
+from planner.agents.merge import merge_with_saved, pin_for_solver
 from planner.agents.parser import parse_day
 from planner.agents.state import PlannerState
 from planner.db.repository import DayAlreadySaved, PlanRepository
@@ -26,11 +25,6 @@ CONFLICT = "conflict"
 ACCEPT = "accept"
 EDIT = "edit"
 SUGGEST = "suggest"
-SAVE = "save"
-ASK = "ask"
-SKIP = "skip"
-REPLACE = "replace"
-KEEP = "keep"
 
 
 def all_warnings(state: PlannerState) -> list[str]:
@@ -62,17 +56,6 @@ def route_after_critic(state: PlannerState) -> str:
     return SUGGEST if state["critique"]["suggestions"] else DONE
 
 
-def route_before_save(state: PlannerState) -> str:
-    """Save directly a new date, ask first if the date is already saved."""
-    if "day_date" not in state:
-        return SKIP
-    return ASK if state["existing_day"] else SAVE
-
-
-def route_after_existing_day(state: PlannerState) -> str:
-    return REPLACE if state["save_choice"] == "replace" else KEEP
-
-
 def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository | None = None):
     """Build the planner graph.
 
@@ -80,13 +63,16 @@ def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository
     - all tasks scheduled -> critic
     - some tasks left out -> review_plan -> critic (accepted) or back to ask_approval
     - required tasks in conflict -> resolve_conflict -> editor -> scheduler again
-    critic -> (suggest_activities when the day looks too empty) -> saving, then END:
-    - new date -> save_plan
-    - date already saved -> ask_existing_day -> save_plan (replace) or END (keep)
+    critic -> (suggest_activities when the day looks too empty) -> save_plan -> END.
 
-    ask_approval, resolve_conflict, review_plan, suggest_activities and ask_existing_day
-    pause the graph until the user answers; the graph needs a checkpointer to resume.
-    Each loop starts from the tasks already edited.
+    With a repository, check_saved_day runs right after the parser: if the date already
+    has a saved plan, its tasks join the new ones, pinned at their times, and the user sees
+    them in the confirmation. The user can replace the saved plan instead of merging.
+    save_plan writes at the end, without further questions.
+
+    ask_approval, resolve_conflict, review_plan and suggest_activities pause the graph
+    until the user answers; the graph needs a checkpointer to resume. Each loop starts
+    from the tasks already edited.
 
     The LLM client and the plan repository are injected here and reach the nodes through
     a closure, so they never enter the state (which must stay serializable).
@@ -102,9 +88,24 @@ def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository
             "sources": result.sources,
         }
 
+    def check_saved_day(state: PlannerState) -> dict:
+        # solo lettura, subito dopo il parser: il resto del grafo lavora sulla giornata intera
+        if "day_date" not in state:
+            return {}
+        saved = repository.load(state["day_date"])
+        if saved is None:
+            return {"saved_day": None}
+        tasks, sources, info = merge_with_saved(saved, state["tasks"], state["sources"])
+        return {"tasks": tasks, "sources": sources, "saved_day": info}
+
     def ask_approval(state: PlannerState) -> dict:
-        # il riepilogo è ciò che il chiamante vede in result["__interrupt__"]
-        summary = approval(state["tasks"], state["rejected"], all_warnings(state))
+        # il riepilogo è ciò che il chiamante vede in result["__interrupt__"];
+        # i task già in agenda non si correggono: si mostrano a parte
+        saved = state.get("saved_day")
+        locked = set(saved["task_ids"]) if saved else set()
+        new_tasks = [task for task in state["tasks"] if task.id not in locked]
+        summary = approval(new_tasks, state["rejected"], all_warnings(state))
+        summary["saved_day"] = saved_day_summary(saved, state["tasks"]) if saved else None
         # alla ripresa il nodo riparte dall'inizio e interrupt restituisce la risposta
         # response_schema: il chiamante vede lo schema, e una risposta non valida
         # solleva ValidationError lasciando il grafo in pausa (si può riprovare)
@@ -114,11 +115,32 @@ def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository
 
     def editor_node(state: PlannerState) -> dict:
         response = ApprovalResponse.model_validate(state["user_response"])
-        tasks, edit_warnings = apply_edits(state["tasks"], response)
-        return {"tasks": tasks, "edit_warnings": edit_warnings}
+        saved = state.get("saved_day")
+        locked = set(saved["task_ids"]) if saved else set()
+        tasks, sources = state["tasks"], state["sources"]
+        update = {}
+
+        if response.replace_saved and saved and not saved["replaced"]:
+            # sostituire: via i task della giornata salvata, che alla fine verrà sovrascritta
+            tasks = [task for task in tasks if task.id not in locked]
+            sources = {key: text for key, text in sources.items() if key not in locked}
+            update["saved_day"] = {**saved, "replaced": True, "task_ids": [], "pinned": {}}
+            update["sources"] = sources
+
+        warnings = [
+            f"{task_id}: task già in agenda, non modificabile"
+            for task_id in response.edits
+            if task_id in locked
+        ]
+        allowed = {key: edit for key, edit in response.edits.items() if key not in locked}
+        tasks, edit_warnings = apply_edits(tasks, ApprovalResponse(edits=allowed))
+        return {"tasks": tasks, "edit_warnings": warnings + edit_warnings} | update
 
     def scheduler_node(state: PlannerState) -> dict:
-        return {"schedule": schedule(state["tasks"], state["day"])}
+        # i task già in agenda restano dove sono: fissi e obbligatori, ma solo per il solver
+        saved = state.get("saved_day")
+        pinned = saved["pinned"] if saved else {}
+        return {"schedule": schedule(pin_for_solver(state["tasks"], pinned), state["day"])}
 
     def resolve_conflict(state: PlannerState) -> dict:
         summary = conflict_summary(state["schedule"], state["tasks"], all_warnings(state))
@@ -150,39 +172,22 @@ def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository
         # TODO passo 3: le proposte accettate diventano task e tornano allo scheduler
         return {}
 
-    def check_saved_day(state: PlannerState) -> dict:
-        # solo lettura: decide se serve chiedere all'utente prima di salvare
-        if "day_date" not in state:
-            return {"save_result": {"saved": False, "message": "Piano non salvato: manca la data."}}
-        saved = repository.load(state["day_date"])
-        return {"existing_day": None if saved is None else saved_day_summary(saved)}
-
-    def ask_existing_day(state: PlannerState) -> dict:
-        new_plan = plan_summary(state["schedule"], state["tasks"], all_warnings(state))
-        answer = interrupt(
-            {
-                "step": EXISTING_DAY,
-                "day_date": state["day_date"].isoformat(),
-                "saved": state["existing_day"],
-                "new": new_plan,
-            },
-            response_schema=ExistingDayResponse,
-        )
-        update = {"save_choice": answer.choice}
-        if answer.choice == "keep":
-            day = state["day_date"].strftime("%d/%m/%Y")
-            message = f"Piano non salvato: resta quello già salvato per il {day}."
-            update["save_result"] = {"saved": False, "message": message}
-        return update
-
     def save_plan(state: PlannerState) -> dict:
         # l'unico nodo che scrive fuori dal grafo; nessun interrupt, quindi alla ripresa
         # di un'altra domanda non viene rieseguito e non salva due volte
-        replace = state.get("save_choice") == "replace"
+        if "day_date" not in state:
+            return {"save_result": {"saved": False, "message": "Piano non salvato: manca la data."}}
+        saved = state.get("saved_day")
+        replace = saved is not None  # unita o sostituita, la giornata salvata viene riscritta
+        merged = saved is not None and not saved["replaced"]
+        # unendo, restano tutte e due le frasi
+        user_input = (
+            f"{saved['user_input']} · {state['user_input']}" if merged else state["user_input"]
+        )
         try:
             day_id = repository.save(
                 state["day_date"],
-                state["user_input"],
+                user_input,
                 state["day"],
                 state["tasks"],
                 state["schedule"],
@@ -192,11 +197,17 @@ def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository
         except DayAlreadySaved:
             message = "Piano non salvato: nel frattempo la data è stata salvata altrove."
             return {"save_result": {"saved": False, "message": message}}
-        message = "Piano salvato al posto di quello precedente." if replace else "Piano salvato."
+        if merged:
+            message = "Piano unito a quello già salvato."
+        elif replace:
+            message = "Piano salvato al posto di quello precedente."
+        else:
+            message = "Piano salvato."
         return {"save_result": {"saved": True, "day_id": day_id, "message": message}}
 
-    # senza archivio il grafo finisce dopo il Critico, come prima
-    after_plan = "check_saved_day" if repository is not None else END
+    # senza archivio niente controllo né salvataggio: il grafo è quello di prima
+    after_parser = "check_saved_day" if repository is not None else "ask_approval"
+    after_plan = "save_plan" if repository is not None else END
 
     builder = StateGraph(PlannerState)
     builder.add_node("parser", parser_node)
@@ -209,7 +220,7 @@ def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository
     builder.add_node("suggest_activities", suggest_activities)
 
     builder.add_edge(START, "parser")
-    builder.add_edge("parser", "ask_approval")
+    builder.add_edge("parser", after_parser)
     builder.add_edge("ask_approval", "editor")
     builder.add_edge("editor", "scheduler")
     # mappe esplicite: LangGraph conosce in anticipo le destinazioni e le controlla
@@ -229,16 +240,8 @@ def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository
 
     if repository is not None:
         builder.add_node("check_saved_day", check_saved_day)
-        builder.add_node("ask_existing_day", ask_existing_day)
         builder.add_node("save_plan", save_plan)
-        builder.add_conditional_edges(
-            "check_saved_day",
-            route_before_save,
-            {SAVE: "save_plan", ASK: "ask_existing_day", SKIP: END},
-        )
-        builder.add_conditional_edges(
-            "ask_existing_day", route_after_existing_day, {REPLACE: "save_plan", KEEP: END}
-        )
+        builder.add_edge("check_saved_day", "ask_approval")
         builder.add_edge("save_plan", END)
 
     return builder.compile(checkpointer=checkpointer)

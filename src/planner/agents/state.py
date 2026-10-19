@@ -38,7 +38,9 @@ class PlannerState(TypedDict):
     # scritto dal Critico: valutazione della giornata e proposte valide, dati JSON semplici
     critique: NotRequired[dict]
 
-    # scritti dal salvataggio
-    existing_day: NotRequired[dict | None]  # il piano già salvato per la data, se c'è
-    save_choice: NotRequired[str]  # "replace" o "keep", se la data esisteva
-    save_result: NotRequired[dict]  # esito per il chiamante: salvato?, messaggio
+    # scritto da check_saved_day (e dall'editor, se l'utente sceglie di sostituire):
+    # la giornata già salvata per la data, i suoi task (non modificabili) e dove sono bloccati
+    saved_day: NotRequired[dict | None]
+
+    # scritto da save_plan: esito per il chiamante, salvato? e messaggio
+    save_result: NotRequired[dict]

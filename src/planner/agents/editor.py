@@ -40,6 +40,8 @@ class ApprovalResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     edits: dict[str, TaskEdit]
+    # solo se la data ha già un piano salvato: True lo sostituisce invece di unirlo
+    replace_saved: bool = False
 
 
 def _short_error(err: ValidationError) -> str:

@@ -3,7 +3,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from planner.agents.parser import RejectedTask
-from planner.db.store import SavedDay
 from planner.solver.models import Schedule, Task, fmt_time
 
 # il campo "step" di ogni riepilogo dice al chiamante a quale domanda sta rispondendo
@@ -11,7 +10,6 @@ CONFIRM_TASKS = "confirm_tasks"
 RESOLVE_CONFLICT = "resolve_conflict"
 REVIEW_PLAN = "review_plan"
 SUGGEST_ACTIVITIES = "suggest_activities"
-EXISTING_DAY = "existing_day"
 
 
 class TaskSummary(BaseModel):
@@ -142,32 +140,32 @@ def conflict_summary(plan: Schedule, tasks: list[Task], warnings: list[str]) -> 
 
 
 class SavedDaySummary(BaseModel):
-    """A day already in the database, as shown to the user."""
+    """The day already saved for the date, as shown in the task confirmation."""
 
+    day_date: str
     user_input: str
-    scheduled: list[ScheduledSummary]  # in ordine di orario
+    replaced: bool  # True: l'utente ha scelto di sostituirlo, i suoi task non ci sono più
+    scheduled: list[ScheduledSummary]  # dove restano i task già in agenda
     unscheduled: list[str]
 
 
-def saved_day_summary(saved: SavedDay) -> dict:
-    """Build the summary of a saved day, as plain JSON data."""
-    in_plan = {item.task_id for item in saved.scheduled}
-    summary = SavedDaySummary(
-        user_input=saved.user_input,
-        scheduled=[
+def saved_day_summary(saved: dict, tasks: list[Task]) -> dict:
+    """Build the summary of the saved day from the state, as plain JSON data."""
+    by_id = {task.id: task for task in tasks}
+    pinned = saved["pinned"]
+    scheduled = []
+    for task_id, start in sorted(pinned.items(), key=lambda item: item[1]):
+        task = by_id[task_id]
+        scheduled.append(
             ScheduledSummary(
-                title=item.title, start=fmt_time(item.start_min), end=fmt_time(item.end_min)
+                title=task.title, start=fmt_time(start), end=fmt_time(start + task.duration_min)
             )
-            for item in saved.scheduled
-        ],
-        unscheduled=[task.title for task in saved.tasks if task.id not in in_plan],
+        )
+    summary = SavedDaySummary(
+        day_date=saved["day_date"],
+        user_input=saved["user_input"],
+        replaced=saved["replaced"],
+        scheduled=scheduled,
+        unscheduled=[by_id[i].title for i in saved["task_ids"] if i not in pinned],
     )
     return summary.model_dump(mode="json")
-
-
-class ExistingDayResponse(BaseModel):
-    """What to do when the date is already saved: replace the saved day or keep it."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    choice: Literal["replace", "keep"]

@@ -25,9 +25,9 @@
 - [ ] Database (PostgreSQL)
   - [x] schema con Alembic: `days` (una per data) e `tasks` (chiave esterna con `ON DELETE CASCADE`)
   - [x] `store.py` (salva, rilegge, sostituisce in una transazione) e test di integrazione su `planner_test`
-  - [x] salvataggio nel grafo: `check_saved_day` → `ask_existing_day` (sostituisci / mantieni) → `save_plan`; archivio iniettato con un `Protocol`
-  - [x] interfaccia: selettore della data, i due piani affiancati, esito del salvataggio
-  - [ ] "unisci": i task salvati restano fermi, quelli nuovi entrano negli spazi liberi
+  - [x] salvataggio nel grafo: `check_saved_day` subito dopo il parser, `save_plan` alla fine senza altre domande; archivio iniettato con un `Protocol`
+  - [x] unione: se la data ha già un piano, i suoi task si uniscono ai nuovi, bloccati al loro orario (solo per il solver); il Critico valuta la giornata intera; "Sostituisci il piano salvato" nella conferma
+  - [x] interfaccia: selettore della data, "Già in agenda" nella conferma, un solo bottone di conferma, esito del salvataggio
   - [ ] view e stored procedure (statistiche sulle giornate passate); storico nell'interfaccia
 - [ ] Memoria con pgvector (preferenze e giornate passate)
 - [ ] API FastAPI ed export `.ics`
@@ -68,7 +68,8 @@
 - **Conferma dell'utente:** il riepilogo non mostra il `source` (serve solo al grounding del Parser). La risposta contiene solo le differenze (`{"edits": {"t2": {"priority": 2}}}`, `{"edits": {}}` = confermo tutto), non la lista completa.
 - **Editor separato da chi decide:** interfaccia e futuro agente producono lo stesso formato di correzioni; l'editor le valida e le applica. Correzione su id inesistente o che rende il task invalido: ignorata per intero, con avviso.
 - **Interfaccia:** Streamlit per ora (solo Python); FastAPI quando servirà un'API vera (`.ics`, altri client). Il grafo non cambia.
-- **Database, una giornata per data:** vincolo `UNIQUE (day_date)` come ultima difesa; al salvataggio il grafo controlla se la data esiste già e, se sì, chiede all'utente se sovrascrivere (sì: in una transazione cancella la vecchia giornata, i task spariscono con `ON DELETE CASCADE`, e inserisce la nuova; no: non salva).
+- **Database, una giornata per data:** vincolo `UNIQUE (day_date)` come ultima difesa. Il controllo avviene subito dopo il parser, non alla fine: se la data esiste già, i task salvati entrano nella conferma (non modificabili, bloccati al loro orario) e l'unione è il comportamento normale; "Sostituisci il piano salvato" li scarta. Alla fine la giornata viene riscritta in una transazione (i task vecchi spariscono con `ON DELETE CASCADE`). Così il Critico valuta la giornata intera. Per non toccare il piano salvato basta non confermare: si salva solo alla fine.
+- **Un solo bottone di conferma:** `diff_edits` capisce da solo se la tabella è cambiata; nessun checksum (servirebbe comunque sapere *cosa* è cambiato, e sarebbe fragile con "15:30" e "15:30:00.000").
 - **Migrazioni con Alembic, SQL puro:** revisioni con `op.execute`, una transazione per revisione; SQLAlchemy solo come motore di Alembic, l'app usa `psycopg` diretto. Una revisione già condivisa non si modifica: se ne scrive una nuova.
 - **Checkpoint:** `LANGGRAPH_STRICT_MSGPACK=true`; LangGraph ammette da solo i tipi dichiarati in `PlannerState`.
 - **Domande all'utente:** ogni riepilogo passato a `interrupt` ha un campo `step` (`confirm_tasks`, `resolve_conflict`, `review_plan`) che dice al chiamante a quale domanda risponde; ogni domanda ha il suo `response_schema`.

@@ -20,7 +20,6 @@ from pydantic import ValidationError
 
 from planner.agents.approval import (
     CONFIRM_TASKS,
-    EXISTING_DAY,
     RESOLVE_CONFLICT,
     REVIEW_PLAN,
     SUGGEST_ACTIVITIES,
@@ -152,8 +151,27 @@ def right_aligned_buttons():
     return st.container(horizontal=True, horizontal_alignment="right")
 
 
+def show_saved_day(saved: dict) -> None:
+    """The plan already saved for the date: merged by default, or replaced if the user chose so."""
+    day = italian_date(saved["day_date"])
+    if saved["replaced"]:
+        st.warning(f"Il piano già salvato per il {day} verrà sostituito da questo.")
+        return
+    st.info(
+        f"Hai già un piano per il {day}: i nuovi task verranno aggiunti negli spazi liberi, "
+        "quelli già in agenda restano dove sono."
+    )
+    st.markdown("**Già in agenda**")
+    st.caption(f"«{saved['user_input']}»")
+    show_schedule(saved)
+
+
 def show_confirmation(summary: dict) -> None:
     st.subheader("Controlla i task")
+    saved = summary.get("saved_day")
+    if saved:
+        show_saved_day(saved)
+        st.markdown("**Nuovi task**")
     if summary["tasks"]:
         st.caption(
             "Puoi cambiare durata, priorità, obbligo e orari prima di pianificare. "
@@ -166,11 +184,13 @@ def show_confirmation(summary: dict) -> None:
     show_rejected(summary)
     show_warnings(summary)
 
+    # un solo bottone: diff_edits capisce da solo se qualcosa è cambiato ({"edits": {}} se no)
     buttons = right_aligned_buttons()
     if buttons.button("Conferma e pianifica", type="primary"):
         answer(diff_edits(summary["tasks"], edited.to_dict("index")), "Correzioni non valide")
-    if buttons.button("Continua senza modifiche"):
-        answer({"edits": {}}, "Risposta non valida")  # ignora eventuali modifiche in tabella
+    if saved and not saved["replaced"] and buttons.button("Sostituisci il piano salvato"):
+        response = diff_edits(summary["tasks"], edited.to_dict("index"))
+        answer(response | {"replace_saved": True}, "Correzioni non valide")
 
 
 def show_conflict(summary: dict) -> None:
@@ -187,10 +207,10 @@ def show_conflict(summary: dict) -> None:
         answer(diff_edits(summary["tasks"], edited.to_dict("index")), "Correzioni non valide")
 
 
-def show_schedule(plan: dict, where=st) -> None:
+def show_schedule(plan: dict) -> None:
     """The scheduled tasks as a table, plus the ones left out."""
     if plan["scheduled"]:
-        where.dataframe(
+        st.dataframe(
             [
                 {"Dalle": s["start"], "Alle": s["end"], "Task": s["title"]}
                 for s in plan["scheduled"]
@@ -198,9 +218,9 @@ def show_schedule(plan: dict, where=st) -> None:
             hide_index=True,
         )
     else:
-        where.info("Nessun task nel piano.")
+        st.info("Nessun task nel piano.")
     if plan["unscheduled"]:
-        where.warning(f"Non inseriti: {', '.join(plan['unscheduled'])}")
+        st.warning(f"Non inseriti: {', '.join(plan['unscheduled'])}")
 
 
 def show_plan(plan: dict) -> None:
@@ -211,23 +231,6 @@ def show_plan(plan: dict) -> None:
 
 def italian_date(iso: str) -> str:
     return date.fromisoformat(iso).strftime("%d/%m/%Y")
-
-
-def show_existing_day(question: dict) -> None:
-    st.subheader(f"Hai già un piano per il {italian_date(question['day_date'])}")
-    saved, new = st.columns(2)
-    saved.markdown("**Piano salvato**")
-    saved.caption(f"«{question['saved']['user_input']}»")
-    show_schedule(question["saved"], where=saved)
-    new.markdown("**Piano nuovo**")
-    new.caption(" ")  # allinea le due tabelle
-    show_schedule(question["new"], where=new)
-
-    buttons = right_aligned_buttons()
-    if buttons.button("Sostituisci con il nuovo", type="primary"):
-        answer({"choice": "replace"}, "Risposta non valida")
-    if buttons.button("Mantieni quello salvato"):
-        answer({"choice": "keep"}, "Risposta non valida")
 
 
 def show_review(plan: dict) -> None:
@@ -341,5 +344,3 @@ elif "pending" in st.session_state:
         show_review(st.session_state.pending)
     elif step == SUGGEST_ACTIVITIES:
         show_suggestions(st.session_state.pending)
-    elif step == EXISTING_DAY:
-        show_existing_day(st.session_state.pending)
