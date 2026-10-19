@@ -2,10 +2,11 @@ from datetime import date
 
 from pydantic import BaseModel
 
+from planner.db.preferences import SimilarPreference
 from planner.db.repository import DayAlreadySaved
 from planner.db.store import SavedDay
 from planner.llm.base import LLMClient
-from planner.llm.embedder import EMBED_DIM, Embedder
+from planner.llm.embedder import EMBED_DIM, Embedder, cosine_similarity
 from planner.solver.models import DayConfig, Schedule, Task
 
 
@@ -90,3 +91,48 @@ def unit(i: int, dim: int = EMBED_DIM) -> list[float]:
     vector = [0.0] * dim
     vector[i] = 1.0
     return vector
+
+
+class FakePreferenceRepository:
+    """In-memory PreferenceRepository: similarity computed in Python like pgvector would."""
+
+    def __init__(self) -> None:
+        self.rows: dict[int, dict] = {}
+        self.next_id = 1
+
+    def add(
+        self, text: str, source: str, embedding: list[float], cluster_embedding: list[float]
+    ) -> int:
+        pref_id = self.next_id
+        self.next_id += 1
+        self.rows[pref_id] = {
+            "text": text,
+            "source": source,
+            "embedding": embedding,
+            "cluster": cluster_embedding,
+            "times_seen": 1,
+        }
+        return pref_id
+
+    def similar(
+        self, cluster_embedding: list[float], min_similarity: float
+    ) -> list[SimilarPreference]:
+        found = [
+            SimilarPreference(
+                id=pref_id,
+                text=row["text"],
+                similarity=cosine_similarity(cluster_embedding, row["cluster"]),
+            )
+            for pref_id, row in self.rows.items()
+        ]
+        found = [p for p in found if p.similarity >= min_similarity]
+        return sorted(found, key=lambda p: p.similarity, reverse=True)[:3]
+
+    def mark_seen(self, pref_id: int) -> None:
+        self.rows[pref_id]["times_seen"] += 1
+
+    def delete(self, pref_id: int) -> bool:
+        return self.rows.pop(pref_id, None) is not None
+
+    def texts(self) -> list[str]:
+        return [row["text"] for row in self.rows.values()]

@@ -2,6 +2,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from planner.agents.approval import (
+    CONFIRM_PREFERENCES,
     SUGGEST_ACTIVITIES,
     PlanReviewResponse,
     approval,
@@ -13,9 +14,15 @@ from planner.agents.critic import SuggestionsResponse, critique
 from planner.agents.editor import ApprovalResponse, apply_edits
 from planner.agents.merge import merge_with_saved, pin_for_solver
 from planner.agents.parser import parse_day
+from planner.agents.preferences import (
+    PreferencesResponse,
+    find_candidates,
+    store_preferences,
+)
 from planner.agents.state import PlannerState
-from planner.db.repository import DayAlreadySaved, PlanRepository
+from planner.db.repository import DayAlreadySaved, PlanRepository, PreferenceRepository
 from planner.llm.base import LLMClient
+from planner.llm.embedder import Embedder
 from planner.solver.cpsat_scheduler import schedule
 
 # etichette delle funzioni di instradamento, collegate ai nodi nelle mappe degli archi
@@ -25,6 +32,9 @@ CONFLICT = "conflict"
 ACCEPT = "accept"
 EDIT = "edit"
 SUGGEST = "suggest"
+REMEMBER = "remember"
+CONFIRM = "confirm"
+STORE = "store"
 
 
 def all_warnings(state: PlannerState) -> list[str]:
@@ -56,7 +66,26 @@ def route_after_critic(state: PlannerState) -> str:
     return SUGGEST if state["critique"]["suggestions"] else DONE
 
 
-def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository | None = None):
+def route_after_save(state: PlannerState) -> str:
+    """Look for preferences only in a day that was really saved."""
+    return REMEMBER if state.get("save_result", {}).get("saved") else DONE
+
+
+def route_after_extract(state: PlannerState) -> str:
+    """Ask the user only about new preferences; duplicates are just counted again."""
+    candidates = state["preference_candidates"]
+    if any(c["duplicate_of"] is None for c in candidates):
+        return CONFIRM
+    return STORE if candidates else DONE
+
+
+def build_graph(
+    client: LLMClient,
+    checkpointer=None,
+    repository: PlanRepository | None = None,
+    embedder: Embedder | None = None,
+    preferences: PreferenceRepository | None = None,
+):
     """Build the planner graph.
 
     START -> parser -> ask_approval -> editor -> scheduler, then from the solver's result:
@@ -77,6 +106,10 @@ def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository
     The LLM client and the plan repository are injected here and reach the nodes through
     a closure, so they never enter the state (which must stay serializable).
     Without a repository the plan is not saved.
+
+    With an embedder and a preference repository too, after save_plan:
+    extract_preferences (LLM: extraction, then the judge on close saved ones)
+    -> confirm_preferences (interrupt, only for new ones) -> store_preferences -> END.
     """
 
     def parser_node(state: PlannerState) -> dict:
@@ -212,6 +245,31 @@ def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository
             message += f" Non salvati perché fuori dal piano: {', '.join(left_out)}."
         return {"save_result": {"saved": True, "day_id": day_id, "message": message}}
 
+    def extract_preferences(state: PlannerState) -> dict:
+        # LLM ed embedding in un nodo senza interrupt: alla ripresa non si rifanno
+        candidates, _ = find_candidates(state["user_input"], client, embedder, preferences)
+        return {"preference_candidates": candidates}
+
+    def confirm_preferences(state: PlannerState) -> dict:
+        new = [
+            {"index": i, "text": c["text"], "source": c["source"], "similar": c["similar"]}
+            for i, c in enumerate(state["preference_candidates"])
+            if c["duplicate_of"] is None
+        ]
+        answer = interrupt(
+            {"step": CONFIRM_PREFERENCES, "preferences": new},
+            response_schema=PreferencesResponse,
+        )
+        return {"preference_answer": answer.model_dump()}
+
+    def store_preferences_node(state: PlannerState) -> dict:
+        # solo duplicati: nessuna domanda, nessuna preferenza nuova da tenere
+        answer = PreferencesResponse.model_validate(state.get("preference_answer", {"keep": []}))
+        result = store_preferences(state["preference_candidates"], answer, embedder, preferences)
+        return {"preference_result": result}
+
+    remember = repository is not None and embedder is not None and preferences is not None
+
     # senza archivio niente controllo né salvataggio: il grafo è quello di prima
     after_parser = "check_saved_day" if repository is not None else "ask_approval"
     after_plan = "save_plan" if repository is not None else END
@@ -249,6 +307,21 @@ def build_graph(client: LLMClient, checkpointer=None, repository: PlanRepository
         builder.add_node("check_saved_day", check_saved_day)
         builder.add_node("save_plan", save_plan)
         builder.add_edge("check_saved_day", "ask_approval")
-        builder.add_edge("save_plan", END)
+        if remember:
+            builder.add_node("extract_preferences", extract_preferences)
+            builder.add_node("confirm_preferences", confirm_preferences)
+            builder.add_node("store_preferences", store_preferences_node)
+            builder.add_conditional_edges(
+                "save_plan", route_after_save, {REMEMBER: "extract_preferences", DONE: END}
+            )
+            builder.add_conditional_edges(
+                "extract_preferences",
+                route_after_extract,
+                {CONFIRM: "confirm_preferences", STORE: "store_preferences", DONE: END},
+            )
+            builder.add_edge("confirm_preferences", "store_preferences")
+            builder.add_edge("store_preferences", END)
+        else:
+            builder.add_edge("save_plan", END)
 
     return builder.compile(checkpointer=checkpointer)

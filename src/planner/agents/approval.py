@@ -10,6 +10,7 @@ CONFIRM_TASKS = "confirm_tasks"
 RESOLVE_CONFLICT = "resolve_conflict"
 REVIEW_PLAN = "review_plan"
 SUGGEST_ACTIVITIES = "suggest_activities"
+CONFIRM_PREFERENCES = "confirm_preferences"
 
 
 class TaskSummary(BaseModel):

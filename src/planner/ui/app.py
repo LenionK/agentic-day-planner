@@ -19,6 +19,7 @@ from langgraph.types import Command
 from pydantic import ValidationError
 
 from planner.agents.approval import (
+    CONFIRM_PREFERENCES,
     CONFIRM_TASKS,
     RESOLVE_CONFLICT,
     REVIEW_PLAN,
@@ -29,8 +30,8 @@ from planner.agents.approval import (
 from planner.agents.critic import duration_text
 from planner.agents.graph import all_warnings, build_graph
 from planner.config import Settings
-from planner.db.repository import PostgresPlanRepository
-from planner.llm.factory import build_llm_client
+from planner.db.repository import PostgresPlanRepository, PostgresPreferenceRepository
+from planner.llm.factory import build_embedder, build_llm_client
 from planner.solver.models import DayConfig, fmt_time
 from planner.ui.edits import diff_edits, to_time
 
@@ -80,7 +81,16 @@ def purge_on_startup() -> int:
 def get_graph():
     """Created once per server: a new InMemorySaver would forget the paused graphs."""
     client = build_llm_client(Settings())
-    return build_graph(client, checkpointer=InMemorySaver(), repository=get_repository())
+    repository = get_repository()
+    # memoria delle preferenze solo con il database: si salvano dopo il piano
+    preferences = PostgresPreferenceRepository(repository.conninfo) if repository else None
+    return build_graph(
+        client,
+        checkpointer=InMemorySaver(),
+        repository=repository,
+        embedder=build_embedder(Settings()),
+        preferences=preferences,
+    )
 
 
 def graph_config() -> dict:
@@ -303,6 +313,29 @@ def show_suggestions(critique: dict) -> None:
         answer({"accepted": []}, "Risposta non valida")
 
 
+def show_preferences_confirmation(question: dict) -> None:
+    """New preferences found in the sentence: the user picks which to remember.
+
+    Next to a preference close to one already saved, the saved one can be deleted:
+    that is how the user resolves a contradiction ("la sera" instead of "la mattina").
+    """
+    st.subheader("Ho capito queste preferenze")
+    st.caption("Spunta quelle da ricordare: le userò per le prossime giornate.")
+    thread = st.session_state.thread_id
+    keep, delete = [], []
+    for pref in question["preferences"]:
+        with st.container(border=True):
+            if st.checkbox(pref["text"], value=True, key=f"pref-{thread}-{pref['index']}"):
+                keep.append(pref["index"])
+            st.caption(f"«{pref['source']}»")
+            for saved in pref["similar"]:
+                label = f"Cancella quella già salvata: {saved['text']}"
+                if st.checkbox(label, value=False, key=f"pref-del-{thread}-{saved['id']}"):
+                    delete.append(saved["id"])
+    if right_aligned_buttons().button("Conferma", type="primary"):
+        answer({"keep": keep, "delete": delete}, "Risposta non valida")
+
+
 def show_save_result(saved: dict | None) -> None:
     """The outcome of saving, at the bottom: it is the last thing that happened."""
     st.divider()
@@ -339,6 +372,9 @@ def show_final(result: dict) -> None:
     show_rejected(tasks)
 
     show_save_result(result.get("save_result"))
+    remembered = result.get("preference_result")
+    if remembered and remembered["message"]:
+        st.info(remembered["message"], icon="🧠")
 
 
 # nomi italiani scritti a mano: strftime("%A") dipende dalla lingua del sistema
@@ -452,3 +488,5 @@ elif "pending" in st.session_state:
         show_review(st.session_state.pending)
     elif step == SUGGEST_ACTIVITIES:
         show_suggestions(st.session_state.pending)
+    elif step == CONFIRM_PREFERENCES:
+        show_preferences_confirmation(st.session_state.pending)

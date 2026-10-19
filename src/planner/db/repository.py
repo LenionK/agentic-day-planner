@@ -9,6 +9,15 @@ from typing import Protocol
 
 import psycopg
 
+from planner.db.preferences import (
+    SavedPreference,
+    SimilarPreference,
+    delete_preference,
+    insert_preference,
+    list_preferences,
+    mark_seen,
+    similar_preferences,
+)
 from planner.db.store import (
     DaySummary,
     SavedDay,
@@ -92,3 +101,53 @@ class PostgresPlanRepository:
         except psycopg.errors.UniqueViolation as err:
             # il grafo non deve conoscere gli errori di psycopg
             raise DayAlreadySaved(day_date.isoformat()) from err
+
+
+class PreferenceRepository(Protocol):
+    """What the graph needs to remember preferences (vectors are lists of floats)."""
+
+    def similar(
+        self, cluster_embedding: list[float], min_similarity: float
+    ) -> list[SimilarPreference]:
+        """Saved preferences close to this one, the closest first (at most 3)."""
+        ...
+
+    def add(
+        self, text: str, source: str, embedding: list[float], cluster_embedding: list[float]
+    ) -> int: ...
+
+    def mark_seen(self, pref_id: int) -> None: ...
+
+    def delete(self, pref_id: int) -> bool: ...
+
+
+class PostgresPreferenceRepository:
+    """One connection per operation, committed at the end of the `with` block."""
+
+    def __init__(self, conninfo: str) -> None:
+        self.conninfo = conninfo
+
+    def similar(
+        self, cluster_embedding: list[float], min_similarity: float
+    ) -> list[SimilarPreference]:
+        with psycopg.connect(self.conninfo) as conn:
+            return similar_preferences(conn, cluster_embedding, min_similarity)
+
+    def add(
+        self, text: str, source: str, embedding: list[float], cluster_embedding: list[float]
+    ) -> int:
+        with psycopg.connect(self.conninfo) as conn:
+            return insert_preference(conn, text, source, embedding, cluster_embedding)
+
+    def mark_seen(self, pref_id: int) -> None:
+        with psycopg.connect(self.conninfo) as conn:
+            mark_seen(conn, pref_id)
+
+    def delete(self, pref_id: int) -> bool:
+        with psycopg.connect(self.conninfo) as conn:
+            return delete_preference(conn, pref_id)
+
+    def all(self) -> list[SavedPreference]:
+        """For the interface: the graph does not need it."""
+        with psycopg.connect(self.conninfo) as conn:
+            return list_preferences(conn)

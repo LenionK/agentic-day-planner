@@ -6,9 +6,11 @@ Two LLM jobs, both with the reasoning (or the source) written first:
   from "in the evening" (measured in tests/eval/run_embeddings.py), the LLM can.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from planner.db.repository import PreferenceRepository
 from planner.llm.base import LLMClient
+from planner.llm.embedder import Embedder
 
 MAX_PREFERENCES = 5
 
@@ -47,7 +49,9 @@ Per ogni preferenza, in quest'ordine:
 - source: copia parola per parola il pezzo di frase che la esprime. Non aggiungere parole.
 - cue: copia dal source le parole che la rendono una preferenza e non un impegno \
 (es. "sempre", "mi concentro meglio"). Se non ci sono, NON è una preferenza: non scriverla.
-- text: la preferenza in breve, in italiano, in terza persona. Usa lo STESSO momento del source, \
+- text: la preferenza in breve, SEMPRE in italiano (mai in inglese), in terza persona. \
+Inizia con un verbo: "preferisce", "evita", "non vuole", "fa", "nuota", "studia"... \
+Non scrivere mai la parola "preference". Usa lo STESSO momento del source, \
 senza cambiarlo: "prima di pranzo" resta "prima di pranzo", non diventa "pomeriggio".
 
 Esempi:
@@ -126,3 +130,87 @@ def same_preference(new: str, existing: str, client: LLMClient) -> bool:
         {"role": "user", "content": f'Preferenza A: "{new}"\nPreferenza B: "{existing}"'},
     ]
     return client.generate(messages, SameVerdict).same
+
+
+# sopra questa similarità (vettori clustering) una preferenza salvata è una candidata:
+# il giudice decide se è la stessa, l'utente se cancellarla. Misurata in run_embeddings.py:
+# le parafrasi vere stavano tra 0.90 e 0.97
+SIMILAR_MIN = 0.85
+
+
+class PreferencesResponse(BaseModel):
+    """The user's answer: which new preferences to remember, which saved ones to delete."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    keep: list[int]  # posizioni delle preferenze nuove da ricordare
+    delete: list[int] = Field(default_factory=list)  # id delle salvate simili da cancellare
+
+
+def find_candidates(
+    sentence: str, client: LLMClient, embedder: Embedder, repository: PreferenceRepository
+) -> tuple[list[dict], list[str]]:
+    """Preferences of the sentence, each with what the memory already knows about it.
+
+    For each one: the saved preferences close by vector are asked to the judge in order;
+    the first one judged the same makes it a duplicate (`duplicate_of`), otherwise the
+    close ones are kept as `similar`, for the user to decide. Plain JSON data for the state.
+    """
+    drafts, warnings = extract_preferences(sentence, client)
+    vectors = embedder.embed([d.text for d in drafts], "clustering")
+
+    candidates = []
+    for draft, vector in zip(drafts, vectors, strict=True):
+        duplicate_of, similar = None, []
+        for saved in repository.similar(vector, SIMILAR_MIN):
+            if same_preference(draft.text, saved.text, client):
+                duplicate_of = saved.id
+                break
+            similar.append({"id": saved.id, "text": saved.text})
+        candidates.append(
+            {
+                "text": draft.text,
+                "source": draft.source,
+                "duplicate_of": duplicate_of,
+                "similar": [] if duplicate_of else similar,
+            }
+        )
+    return candidates, warnings
+
+
+def store_preferences(
+    candidates: list[dict],
+    response: PreferencesResponse,
+    embedder: Embedder,
+    repository: PreferenceRepository,
+) -> dict:
+    """Remember what the user confirmed: duplicates seen again, new ones saved, old ones deleted.
+
+    Only the saved preferences shown next to a candidate can be deleted, and only the
+    new candidates can be kept: anything else in the answer is ignored.
+    """
+    for candidate in candidates:
+        if candidate["duplicate_of"] is not None:
+            repository.mark_seen(candidate["duplicate_of"])
+    seen_again = sum(c["duplicate_of"] is not None for c in candidates)
+
+    new = {i for i, c in enumerate(candidates) if c["duplicate_of"] is None}
+    to_save = [candidates[i] for i in sorted(set(response.keep) & new)]
+    texts = [c["text"] for c in to_save]
+    documents = embedder.embed(texts, "document")
+    clusters = embedder.embed(texts, "clustering")
+    for candidate, doc, cluster in zip(to_save, documents, clusters, strict=True):
+        repository.add(candidate["text"], candidate["source"], doc, cluster)
+
+    shown = {s["id"] for c in candidates for s in c["similar"]}
+    deleted = sum(repository.delete(pref_id) for pref_id in set(response.delete) & shown)
+
+    parts = []
+    if to_save:
+        parts.append(f"ricordate {len(to_save)}")
+    if seen_again:
+        parts.append(f"già note {seen_again}")
+    if deleted:
+        parts.append(f"cancellate {deleted}")
+    message = f"Preferenze: {', '.join(parts)}." if parts else ""
+    return {"saved": len(to_save), "seen_again": seen_again, "deleted": deleted, "message": message}

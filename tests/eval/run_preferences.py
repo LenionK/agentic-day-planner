@@ -27,6 +27,9 @@ DEV_SENTENCES = [
     ("spesa, palestra e chiamare il medico entro le 11", False),
     ("palestra dopo le 18, prima sono troppo stanco per allenarmi", True),
     ("devo studiare 3 ore e chiamare la banca entro le 12", False),
+    # dalla prova vera nell'interfaccia: testi usciti in inglese
+    ("studio 2 ore, la mattina mi concentro meglio", True),
+    ("ripasso un'ora, ormai preferisco studiare la sera", True),
 ]
 HOLDOUT_SENTENCES = [
     ("corso di yoga alle 18, la sera mi rilassa più che la mattina", True),

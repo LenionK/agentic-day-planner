@@ -30,7 +30,13 @@
   - [x] interfaccia: selettore della data, "Già in agenda" nella conferma, un solo bottone di conferma, esito del salvataggio
   - [x] view `day_summary` (revisione 0003): per giornata task, obbligatori, minuti e percentuale occupati; "Storico" nella barra laterale
   - [x] procedura `purge_old_days(keep_days = 14)` (revisione 0004), chiamata con `CALL` all'avvio dell'app: le giornate più vecchie di 2 settimane si cancellano, con i loro task
-- [ ] Memoria con pgvector (preferenze e giornate passate)
+- [ ] Memoria delle preferenze con pgvector
+  - [x] `Embedder` (Ollama, `nomic-embed-text`, prefissi document / query / clustering) e misura delle similarità (`tests/eval/run_embeddings.py`)
+  - [x] estrazione delle preferenze (source → cue → text) e giudice dei duplicati, misurati su set di sviluppo e di verifica (`tests/eval/run_preferences.py`)
+  - [x] tabella `preferences` (revisione 0005, due vettori, nessun legame con le giornate)
+  - [x] nel grafo dopo `save_plan`: estrazione → candidate (vettori + giudice) → conferma dell'utente (solo preferenze nuove) → salvataggio
+  - [ ] finestra "🧠 Preferenze": elenco ed eliminazione
+  - [ ] recupero: le preferenze pertinenti nel Critico e nella conferma dei task
 - [ ] API FastAPI ed export `.ics`
 - [ ] Eval dei modelli (Qwen2.5 7B, Phi-4 mini, Llama 3.1 8B, Aya Expanse 8B) sulla GTX 1060
 - [ ] CI con GitHub Actions, AWS con LocalStack e CDK
@@ -71,6 +77,8 @@
 - **Editor separato da chi decide:** interfaccia e futuro agente producono lo stesso formato di correzioni; l'editor le valida e le applica. Correzione su id inesistente o che rende il task invalido: ignorata per intero, con avviso.
 - **Interfaccia:** Streamlit per ora (solo Python); FastAPI quando servirà un'API vera (`.ics`, altri client). Il grafo non cambia.
 - **Database, una giornata per data:** vincolo `UNIQUE (day_date)` come ultima difesa. Il controllo avviene subito dopo il parser, non alla fine: se la data esiste già, i task salvati entrano nella conferma (non modificabili, bloccati al loro orario) e l'unione è il comportamento normale; "Sostituisci il piano salvato" li scarta. Alla fine la giornata viene riscritta in una transazione (i task vecchi spariscono con `ON DELETE CASCADE`). Così il Critico valuta la giornata intera. Per non toccare il piano salvato basta non confermare: si salva solo alla fine.
+- **Preferenze, vettori e giudice:** gli embedding misurano l'argomento, non la polarità ("studiare la mattina" e "la sera" hanno similarità 0.93, più di molte parafrasi): il vettore sceglie solo le candidate (soglia 0.85), un LLM giudica se sono la stessa preferenza, e le contraddizioni le risolve l'utente nella conferma, dove vede le salvate simili e può cancellarle.
+- **Preferenze confermate dall'utente:** una preferenza sbagliata condizionerebbe tutte le giornate future; il modello estrae, l'utente decide. Il testo deve essere in italiano: con lingue diverse la similarità crolla e le contraddizioni non vengono mostrate.
 - **Pulizia delle giornate:** si tengono solo le ultime 2 settimane (più le future), con una procedura nel database chiamata all'avvio dell'app; le preferenze, in una tabella senza legami con le giornate, restano anche quando la giornata da cui sono nate viene cancellata.
 - **Si salva solo il piano:** i task rimasti fuori (accettati in revisione) non entrano nel database; il messaggio finale li elenca. Le colonne `scheduled_*` di `tasks` restano annullabili, ma dall'app arrivano sempre piene.
 - **Un solo bottone di conferma:** `diff_edits` capisce da solo se la tabella è cambiata; nessun checksum (servirebbe comunque sapere *cosa* è cambiato, e sarebbe fragile con "15:30" e "15:30:00.000").

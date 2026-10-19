@@ -44,3 +44,8 @@ class PlannerState(TypedDict):
 
     # scritto da save_plan: esito per il chiamante, salvato? e messaggio
     save_result: NotRequired[dict]
+
+    # memoria delle preferenze, dopo il salvataggio
+    preference_candidates: NotRequired[list[dict]]  # estratte, con duplicate e simili
+    preference_answer: NotRequired[dict]  # risposta dell'utente: quali tenere e cancellare
+    preference_result: NotRequired[dict]  # quante ricordate, già note, cancellate
