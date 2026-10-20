@@ -1,13 +1,16 @@
 import json
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
+from icalendar import Calendar
 from langgraph.checkpoint.memory import InMemorySaver
 
 from planner.agents.graph import build_graph
 from planner.api.app import create_app
 from tests.fakes import FakeClient, FakePlanRepository
+from tests.unit.test_ics import saved_day
 
 RUN = {"title": "Corsa", "category": "attività fisica", "duration_min": 45, "reason": "muoversi"}
 
@@ -31,9 +34,12 @@ def critic_answer(*suggestions: dict) -> str:
 
 
 def start_api(llm: FakeClient, repository: FakePlanRepository | None = None) -> TestClient:
-    """The API with a graph on the fake LLM. Use it in a `with`: that runs the lifespan."""
+    """The API with a graph on the fake LLM. Use it in a `with`: that runs the lifespan.
+
+    The repository, if given, is shared by the graph (saving) and the app (export).
+    """
     graph = build_graph(llm, checkpointer=InMemorySaver(), repository=repository)
-    return TestClient(create_app(graph))
+    return TestClient(create_app(graph, repository))
 
 
 def new_plan(client: TestClient, text: str = "studio") -> str:
@@ -177,3 +183,59 @@ def test_plan_is_saved_for_the_date_of_the_request():
     assert reply.json()["save_result"]["saved"] is True
     assert list(repository.days) == [date(2026, 11, 3)]
     assert [task.title for task in repository.days[date(2026, 11, 3)].tasks] == ["Studio"]
+
+
+def ics_events(content: bytes) -> list[tuple[str, datetime]]:
+    """(title, start) of each event in an .ics file."""
+    return [
+        (str(e["SUMMARY"]), e.decoded("DTSTART"))
+        for e in Calendar.from_ical(content).walk("VEVENT")
+    ]
+
+
+def test_saved_day_downloads_as_a_calendar_file():
+    with start_api(FakeClient([]), FakePlanRepository(saved_day())) as client:
+        reply = client.get("/days/2026-11-03/plan.ics")
+
+    assert reply.status_code == 200
+    assert reply.headers["content-type"].startswith("text/calendar")
+    assert reply.headers["content-disposition"] == 'attachment; filename="piano-2026-11-03.ics"'
+    assert ics_events(reply.content) == [
+        ("Studio", datetime(2026, 11, 3, 9, 30, tzinfo=ZoneInfo("Europe/Rome"))),
+        ("Dentista", datetime(2026, 11, 3, 15, 0, tzinfo=ZoneInfo("Europe/Rome"))),
+    ]
+
+
+def test_plan_saved_through_the_api_can_be_exported():
+    repository = FakePlanRepository()
+    llm = FakeClient([parser_answer("Studio"), critic_answer()])
+    with start_api(llm, repository) as client:
+        thread_id = new_plan(client)
+        answer(client, thread_id, {"edits": {"t1": {"fixed_start": "17:15"}}})
+        reply = client.get("/days/2026-11-03/plan.ics")
+
+    assert ics_events(reply.content) == [
+        ("Studio", datetime(2026, 11, 3, 17, 15, tzinfo=ZoneInfo("Europe/Rome")))
+    ]
+
+
+def test_day_without_a_saved_plan_is_not_found():
+    with start_api(FakeClient([]), FakePlanRepository(saved_day())) as client:
+        reply = client.get("/days/2026-11-04/plan.ics")
+
+    assert reply.status_code == 404
+    assert reply.json()["detail"] == "Nessun piano salvato per il 2026-11-04."
+
+
+def test_export_without_database_is_unavailable():
+    with start_api(FakeClient([])) as client:
+        reply = client.get("/days/2026-11-03/plan.ics")
+
+    assert reply.status_code == 503
+
+
+def test_export_needs_a_real_date():
+    with start_api(FakeClient([]), FakePlanRepository(saved_day())) as client:
+        reply = client.get("/days/domani/plan.ics")
+
+    assert reply.status_code == 422

@@ -22,3 +22,6 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql://planner:planner@localhost:5433/planner"
+
+    # Calendario: il fuso degli orari esportati in .ics
+    timezone: str = "Europe/Rome"

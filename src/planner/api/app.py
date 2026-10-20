@@ -1,8 +1,10 @@
 import uuid
 from contextlib import asynccontextmanager
+from datetime import date
+from zoneinfo import ZoneInfo
 
 import psycopg
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from pydantic import ValidationError
@@ -12,6 +14,7 @@ from planner.agents.graph import all_warnings, build_graph
 from planner.api.schemas import PlanQuestion, PlanRequest, PlanResult, ResumeRequest
 from planner.config import Settings
 from planner.db.repository import PostgresPlanRepository, PostgresPreferenceRepository
+from planner.export.ics import day_to_ics
 from planner.llm.factory import build_embedder, build_llm_client
 from planner.solver.models import DayConfig
 
@@ -54,18 +57,28 @@ def reply(thread_id: str, result: dict) -> PlanQuestion | PlanResult:
     )
 
 
-def create_app(graph=None) -> FastAPI:
-    """Create the API application. Tests pass their own graph; otherwise it is built at startup."""
+def create_app(graph=None, repository=None) -> FastAPI:
+    """Create the API application.
+
+    Tests pass their own graph and plan repository; otherwise both are built at startup,
+    the repository only if the database answers.
+    """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        settings = Settings()
+        # qui e non al primo download: un fuso scritto male in .env si scopre all'avvio
+        app.state.timezone = ZoneInfo(settings.timezone)
         if graph is None:
-            settings = Settings()
             app.state.database = database_available(settings.database_url)
             app.state.graph = build_planner_graph(settings, app.state.database)
+            app.state.repository = (
+                PostgresPlanRepository(settings.database_url) if app.state.database else None
+            )
         else:
             app.state.database = False
             app.state.graph = graph
+            app.state.repository = repository
         yield  # da qui l'app serve le richieste; dopo yield, la chiusura
 
     app = FastAPI(title="Agentic Day Planner", lifespan=lifespan)
@@ -100,6 +113,21 @@ def create_app(graph=None) -> FastAPI:
             detail = err.errors(include_url=False, include_context=False)
             raise HTTPException(status_code=422, detail=detail) from err
         return reply(thread_id, result)
+
+    @app.get("/days/{day_date}/plan.ics")
+    def export_day(day_date: date) -> Response:
+        """The saved plan of a day as an iCalendar file, to import into a calendar app."""
+        if app.state.repository is None:
+            raise HTTPException(status_code=503, detail="Database non disponibile.")
+        saved = app.state.repository.load(day_date)
+        if saved is None:
+            detail = f"Nessun piano salvato per il {day_date.isoformat()}."
+            raise HTTPException(status_code=404, detail=detail)
+        return Response(
+            content=day_to_ics(saved, app.state.timezone),
+            media_type="text/calendar",
+            headers={"Content-Disposition": f'attachment; filename="piano-{day_date}.ics"'},
+        )
 
     return app
 
