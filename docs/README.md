@@ -26,7 +26,8 @@ libretto partendo da zero.
 2. **I capitoli**, nell'ordine in cui i dati attraversano il programma: la frase diventa
    dati validati, un LLM la interpreta, un grafo coordina i passi, un solver costruisce
    l'orario, un'interfaccia lo mostra, un database lo conserva e ricorda le preferenze.
-   L'ultimo capitolo spiega come si verifica che tutto funzioni.
+   Il capitolo 9 spiega come si verifica che tutto funzioni; il 10 apre il programma ad
+   altri client con un'API web.
 
 Ogni capitolo si legge anche da solo, ma i rimandi presuppongono questo ordine.
 
@@ -43,6 +44,7 @@ Ogni capitolo si legge anche da solo, ma i rimandi presuppongono questo ordine.
 | 7 | [Alembic](libretto/07-alembic.md) | 1.20.0 | Migrazioni del database versionate, upgrade e downgrade |
 | 8 | [Embedding e pgvector](libretto/08-embedding-pgvector.md) | `nomic-embed-text`, immagine `pgvector/pgvector:pg16` | Trasformare frasi in vettori, similarità coseno, ricerca nel database, i limiti dei vettori |
 | 9 | [Test e valutazione](libretto/09-test-e-valutazione.md) | pytest 9.1.1 | Test unitari e di integrazione, oggetti finti, test dell'interfaccia, misurare un LLM |
+| 10 | [FastAPI](libretto/10-fastapi.md) | fastapi 0.143.0, uvicorn 0.54.0 | Un'API web: endpoint, validazione delle richieste, codici di stato, una conversazione con il grafo in più richieste |
 
 Le versioni sono quelle installate nel progetto. Contano: librerie come LangGraph e
 Streamlit cambiano spesso, e un esempio scritto per un'altra versione può non funzionare.

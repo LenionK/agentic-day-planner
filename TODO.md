@@ -24,7 +24,7 @@
 ## Prossimi passi
 - [ ] **Migliorare l'interfaccia:** oggi alcune cose non si notano (la domanda sulle preferenze arriva solo alla fine e solo se la frase ne contiene una; i messaggi della memoria sono piccoli). Da rivedere: ordine delle schermate, messaggi più chiari, indicare in che passo del flusso si è, testi delle preferenze modificabili nella conferma.
 - [ ] **Rivedere quando salvare le preferenze:** oggi si estraggono solo dopo il salvataggio del piano e si confermano in una schermata a parte alla fine; valutare se chiederle insieme alla conferma dei task, se ricavarle anche dal comportamento (task spostati, orari scelti spesso) e cosa fare se l'utente abbandona la domanda.
-- [ ] **Continuare il libretto delle tecnologie (`docs/`):** fatti l'indice e i capitoli 1 (Pydantic) e 2 (Ollama e LLM locali). Mancano `architettura.md` e i capitoli 3–9 (LangGraph, CP-SAT, Streamlit, PostgreSQL e psycopg, Alembic, embedding e pgvector, test e valutazione); a FastAPI finito, un capitolo anche per lei. Ogni esempio va provato davvero prima di scriverlo.
+- [ ] **Continuare il libretto delle tecnologie (`docs/`):** fatti l'indice e i capitoli 1 (Pydantic), 2 (Ollama e LLM locali) e 10 (FastAPI). Mancano `architettura.md` e i capitoli 3–9 (LangGraph, CP-SAT, Streamlit, PostgreSQL e psycopg, Alembic, embedding e pgvector, test e valutazione). Ogni esempio va provato davvero prima di scriverlo.
 - [ ] Database (PostgreSQL)
   - [x] schema con Alembic: `days` (una per data) e `tasks` (chiave esterna con `ON DELETE CASCADE`)
   - [x] `store.py` (salva, rilegge, sostituisce in una transazione) e test di integrazione su `planner_test`
@@ -41,6 +41,11 @@
   - [x] finestra "🧠 Preferenze" accanto allo Storico: elenco ed eliminazione
   - [x] recupero: le 3 preferenze più simili ai `source` dei task (come document, senza soglia) date al Critico, che sceglie quelle pertinenti (`applied_preferences`)
 - [ ] API FastAPI ed export `.ics`
+  - [x] app con lifespan (grafo creato una volta, o passato dai test), `GET /health` (il DB ha risposto all'avvio?)
+  - [x] `POST /plans` (frase + data → `thread_id` e prima domanda) e `POST /plans/{thread_id}/resume` (risposta → domanda successiva o piano finito); 422 per risposte non valide (il grafo resta in pausa), `{}` rifiutato prima del grafo, 404 thread inesistente, 409 piano già concluso
+  - [ ] export `.ics` della giornata salvata
+  - [ ] checkpointer su PostgreSQL: oggi i piani in pausa vivono in memoria e si perdono al riavvio del server
+  - [ ] il DB si controlla solo all'avvio: riprovare come fa Streamlit, o dirlo in `/health`
 - [ ] Eval dei modelli (Qwen2.5 7B, Phi-4 mini, Llama 3.1 8B, Aya Expanse 8B) sulla GTX 1060
 - [ ] CI con GitHub Actions, AWS con LocalStack e CDK
 

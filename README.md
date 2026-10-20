@@ -163,6 +163,29 @@ says so); as soon as the database answers, the app uses it. On a GTX 1060 6GB ea
 about 5–15 seconds; the solver and the embeddings are fast. The interface is in Italian, like the
 prompts. After changing the code, restart Streamlit: the graph is cached.
 
+### API
+
+The same graph is available as a REST API (FastAPI):
+
+```bash
+python -m uvicorn planner.api.app:app --reload
+```
+
+The interactive documentation is at <http://127.0.0.1:8000/docs>. A plan is a conversation of
+a few requests:
+
+| Request | What it does |
+|---------|--------------|
+| `GET /health` | whether the API is up and the database answered at startup |
+| `POST /plans` with `{"text": ..., "day_date": "2026-11-03"}` | starts the graph; returns a `thread_id` and the first question (`step`) |
+| `POST /plans/{thread_id}/resume` with `{"answer": {...}}` | answers the question; returns the next one, or `"step": "done"` with plan, critique and save result |
+
+The answer has the format of the question: `{"edits": {}}` to confirm the tasks,
+`{"accept": true}` for the plan review, `{"accepted": [0]}` for the suggestions,
+`{"keep": [0], "delete": []}` for the preferences. Invalid answers get a 422 and the question
+stays open; an unknown `thread_id` gets a 404, a finished plan a 409. Paused plans live in memory:
+they are lost when the server restarts.
+
 ### Database
 
 The schema is managed with **Alembic** (plain SQL revisions in `src/planner/db/migrations/versions`):
@@ -219,6 +242,7 @@ src/planner/
   llm/      LLMClient and Embedder interfaces, Ollama and LangChain clients, factory
   db/       store and preferences (SQL), repository (what the graph uses), Alembic migrations
   ui/       Streamlit interface and edit diffing
+  api/      FastAPI app (endpoints) and request/response models
   dates.py  dates in Italian
   config.py settings from .env
 tests/
@@ -232,14 +256,14 @@ docs/          booklet on the technologies used, in Italian
 
 Working: parser, user confirmation and edits, scheduler, conflict resolution, plan review, day
 critic with suggestions, PostgreSQL storage with merge or replace of a saved day, history and
-purge of old days, memory of preferences with pgvector, Streamlit interface.
+purge of old days, memory of preferences with pgvector, Streamlit interface, REST API with FastAPI.
 
 Next:
 
 - **Interface**: a clearer, more guided interface
 - **Preferences**: review when they are saved, review the vector search, make the critic's use
   of them more reliable
-- **FastAPI** and `.ics` export
+- `.ics` export through the API; a PostgreSQL checkpointer so paused plans survive a restart
 - Model comparison on the same evaluation set
 
 See [TODO.md](TODO.md) for details and design decisions, and [CHANGELOG.md](CHANGELOG.md) for
