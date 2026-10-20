@@ -10,8 +10,7 @@ const state = {
 };
 
 const screenBox = document.querySelector("#screen");
-const errorBox = document.querySelector("#error");
-const busy = document.querySelector("#busy");
+const errorBox = document.querySelector("#error"); // gli errori del modulo, sotto il modulo
 
 // ---------------------------------------------------------------- costruire la pagina
 
@@ -59,8 +58,15 @@ function buttons(...items) {
   return el("div", { class: "buttons" }, ...items);
 }
 
+// onclick riceve il bottone premuto: serve a mostrare l'attesa e gli errori proprio lì,
+// dove l'utente sta guardando
 function button(text, onclick, primary = false) {
-  return el("button", { type: "button", class: primary ? "primary" : null, onclick, text });
+  return el("button", {
+    type: "button",
+    class: primary ? "primary" : null,
+    text,
+    onclick: (event) => onclick(event.currentTarget),
+  });
 }
 
 // ---------------------------------------------------------------- date e durate
@@ -124,29 +130,45 @@ function errorText(detail) {
     .join("; ");
 }
 
-function showError(text) {
-  errorBox.replaceChildren(notice("error", text));
+function clearErrors() {
+  errorBox.replaceChildren();
+  screenBox.querySelectorAll(".alert[role='alert']").forEach((message) => message.remove());
 }
 
-// Mentre l'API lavora: messaggio di attesa e bottoni disattivati, per non mandare due volte.
-async function working(message, task) {
-  busy.textContent = message;
-  busy.hidden = false;
+// L'errore compare vicino al bottone che l'ha causato: sopra la barra dei bottoni della
+// schermata, oppure sotto il modulo. In alto nella pagina, dopo un clic in fondo a una
+// schermata lunga, non lo vedrebbe nessuno.
+function showError(text, origin = null) {
+  clearErrors();
+  const message = el("div", { class: "alert error", role: "alert", text });
+  const bar = origin?.closest("#screen .buttons");
+  if (bar) bar.before(message);
+  else errorBox.append(message);
+  message.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+// Mentre l'API lavora, il bottone premuto dice cosa sta succedendo; tutti i bottoni sono
+// disattivati, per non mandare due volte la stessa risposta.
+async function working(message, task, origin) {
+  const label = origin.textContent;
+  origin.style.minWidth = `${origin.offsetWidth}px`; // il bottone non cambia larghezza
+  origin.textContent = `⏳ ${message}`;
+  origin.setAttribute("aria-busy", "true");
   document.querySelectorAll("button").forEach((b) => (b.disabled = true));
   try {
     return await task();
   } finally {
-    busy.hidden = true;
+    origin.textContent = label;
+    origin.removeAttribute("aria-busy");
     document.querySelectorAll("button").forEach((b) => (b.disabled = false));
   }
 }
 
 // ---------------------------------------------------------------- la conversazione
 
-async function startPlanning(text, dayDate) {
+async function startPlanning(text, dayDate, origin) {
   const result = await working("Sto leggendo la frase...", () =>
-    api("POST", "/plans", { text, day_date: dayDate }),
-  );
+    api("POST", "/plans", { text, day_date: dayDate }), origin);
   if (!result.ok) {
     showError(`Errore ${result.status}: ${errorText(result.data.detail)}`);
     return;
@@ -157,29 +179,54 @@ async function startPlanning(text, dayDate) {
 }
 
 // Risponde alla domanda in corso. Se la risposta non è valida (422) il grafo resta in pausa:
-// l'errore si mostra sopra la stessa schermata, e si può correggere e riprovare.
-async function answer(response, errorPrefix) {
+// l'errore si mostra sopra i bottoni della stessa schermata, e si può correggere e riprovare.
+async function answer(response, errorPrefix, origin) {
   const result = await working("Sto pianificando...", () =>
-    api("POST", `/plans/${state.threadId}/resume`, { answer: response }),
-  );
+    api("POST", `/plans/${state.threadId}/resume`, { answer: response }), origin);
   if (result.status === 422) {
-    showError(`${errorPrefix}: ${errorText(result.data.detail)}`);
+    showError(`${errorPrefix}: ${errorText(result.data.detail)}`, origin);
     return;
   }
   if (result.status === 404) {
-    showError("Questa pianificazione non c'è più (il server è stato riavviato?). Riscrivi la frase.");
+    showError("Questa pianificazione non c'è più (il server è stato riavviato?). Riscrivi la frase.",
+      origin);
     return;
   }
   if (!result.ok) {
-    showError(`Errore ${result.status}: ${errorText(result.data.detail)}`);
+    showError(`Errore ${result.status}: ${errorText(result.data.detail)}`, origin);
     return;
   }
   render(result.data);
 }
 
+// Le fasi della pianificazione, e in quale fase cade ogni domanda del grafo ("step").
+// Una fase senza domande (tutti i task entrano: niente revisione) risulta comunque superata.
+const PHASES = ["Task", "Piano", "Critico", "Preferenze", "Fine"];
+const PHASE_OF_STEP = {
+  confirm_tasks: 0,
+  resolve_conflict: 0,
+  review_plan: 1,
+  suggest_activities: 2,
+  confirm_preferences: 3,
+  done: 4,
+};
+
+// In cima a ogni schermata: quale giorno si sta pianificando e a che punto si è.
+function progress(step) {
+  const current = PHASE_OF_STEP[step];
+  return el("div", { class: "progress" },
+    el("p", { class: "progress-day" },
+      "Pianificazione di ", el("strong", { text: longItalianDate(state.dayDate) })),
+    el("ol", { class: "steps", "aria-label": "Passi della pianificazione" },
+      ...PHASES.map((name, i) => el("li", {
+        class: i < current ? "done" : i === current ? "current" : null,
+        "aria-current": i === current ? "step" : null,
+      }, el("span", { class: "dot", text: i < current ? "✓" : String(i + 1) }), name))));
+}
+
 // La schermata dipende dalla domanda a cui il grafo aspetta risposta ("step").
 function render(data) {
-  errorBox.replaceChildren();
+  clearErrors();
   const draw = {
     confirm_tasks: showConfirmation,
     resolve_conflict: showConflict,
@@ -187,7 +234,8 @@ function render(data) {
     suggest_activities: showSuggestions,
     confirm_preferences: showPreferencesConfirmation,
   }[data.step];
-  screenBox.replaceChildren(...(data.step === "done" ? showFinal(data) : draw(data.question)));
+  const content = data.step === "done" ? showFinal(data) : draw(data.question);
+  screenBox.replaceChildren(progress(data.step), ...content);
   screenBox.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -298,11 +346,12 @@ function showConfirmation(question) {
   parts.push(...showRejected(question), ...showWarnings(question));
 
   // un solo bottone di conferma: diffEdits capisce da solo se qualcosa è cambiato
-  const confirm = button("Conferma e pianifica", () =>
-    answer(diffEdits(question.tasks, read()), "Correzioni non valide"), true);
+  const confirm = button("Conferma e pianifica", (origin) =>
+    answer(diffEdits(question.tasks, read()), "Correzioni non valide", origin), true);
   const replace = saved && !saved.replaced
-    ? button("Sostituisci il piano salvato", () =>
-      answer({ ...diffEdits(question.tasks, read()), replace_saved: true }, "Correzioni non valide"))
+    ? button("Sostituisci il piano salvato", (origin) =>
+      answer({ ...diffEdits(question.tasks, read()), replace_saved: true }, "Correzioni non valide",
+        origin))
     : null;
   parts.push(buttons(confirm, replace));
   return parts;
@@ -317,8 +366,8 @@ function showConflict(question) {
     editor.view,
     ...showWarnings(question),
     // niente "continua senza modifiche": un piano impossibile non si può accettare
-    buttons(button("Riprova a pianificare", () =>
-      answer(diffEdits(question.tasks, editor.read()), "Correzioni non valide"), true)),
+    buttons(button("Riprova a pianificare", (origin) =>
+      answer(diffEdits(question.tasks, editor.read()), "Correzioni non valide", origin), true)),
   ];
 }
 
@@ -330,8 +379,10 @@ function showReview(plan) {
     ...showPlan(plan),
     el("p", {}, el("strong", { text: missing.join(", ") }), ` ${verb} nella giornata. Ti va bene così?`),
     buttons(
-      button("Continua senza modifiche", () => answer({ accept: true }, "Risposta non valida"), true),
-      button("Modifica i task", () => answer({ accept: false }, "Risposta non valida")),
+      button("Continua senza modifiche", (origin) =>
+        answer({ accept: true }, "Risposta non valida", origin), true),
+      button("Modifica i task", (origin) =>
+        answer({ accept: false }, "Risposta non valida", origin)),
     ),
   ];
 }
@@ -369,7 +420,8 @@ function showSuggestions(question) {
     table(["Attività", "Categoria", "Durata (min)", "Perché"],
       question.suggestions.map((s) => [s.title, s.category, s.duration_min, s.reason])),
     ...showWarnings(question),
-    buttons(button("Va bene così", () => answer({ accepted: [] }, "Risposta non valida"), true)),
+    buttons(button("Va bene così", (origin) =>
+      answer({ accepted: [] }, "Risposta non valida", origin), true)),
   ];
 }
 
@@ -396,8 +448,8 @@ function showPreferencesConfirmation(question) {
     heading("Ho capito queste preferenze"),
     caption("Spunta quelle da ricordare: le userò per le prossime giornate."),
     ...cards,
-    buttons(button("Conferma", () =>
-      answer({ keep: chosen(keep), delete: chosen(remove) }, "Risposta non valida"), true)),
+    buttons(button("Conferma", (origin) =>
+      answer({ keep: chosen(keep), delete: chosen(remove) }, "Risposta non valida", origin), true)),
   ];
 }
 
@@ -555,7 +607,9 @@ async function start() {
       showError("Scrivi cosa devi fare.");
       return;
     }
-    startPlanning(text, document.querySelector("#day").value);
+    // event.submitter: il bottone che ha inviato il modulo (anche con Invio nel campo)
+    const origin = event.submitter ?? document.querySelector("#new-plan button[type=submit]");
+    startPlanning(text, document.querySelector("#day").value, origin);
   });
   document.querySelector("#open-history").addEventListener("click", () =>
     openDialog("#history-dialog", fillHistory));

@@ -98,7 +98,23 @@ button:disabled { opacity: 0.5; cursor: progress; }
 
 .caption { color: var(--muted); font-size: 0.875rem; margin: 4px 0; }
 
-.busy::before { content: "⏳ "; }
+/* in cima a ogni schermata: il giorno pianificato e i passi, con quello attuale evidenziato */
+.progress { margin: 28px 0 4px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.progress-day { margin: 0 0 10px; color: var(--muted); }
+.progress-day strong { color: var(--text); }
+.steps { display: flex; flex-wrap: wrap; gap: 6px 18px; list-style: none; margin: 0; padding: 0; }
+.steps li { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 0.9rem; }
+.steps .dot {
+  display: inline-grid; place-items: center; width: 1.6em; height: 1.6em; border-radius: 50%;
+  border: 1px solid var(--border); font-size: 0.8rem;
+}
+.steps li.done { color: var(--text); }
+.steps li.done .dot { background: var(--surface); }
+.steps li.current { color: var(--text); font-weight: 600; }
+.steps li.current .dot { background: var(--primary); border-color: var(--primary); color: #fff; }
+.progress + h2 { margin-top: 16px; }
+
+button[aria-busy="true"] { cursor: progress; }
 
 /* le tabelle larghe scorrono da sole, la pagina no */
 .table-wrap { overflow-x: auto; margin: 8px 0; }
