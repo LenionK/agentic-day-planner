@@ -46,7 +46,7 @@ Un modello "chat" riceve una lista di messaggi, ciascuno con un ruolo:
 ```python
 messages = [
     {"role": "system", "content": "Estrai i task dalla frase dell'utente. ..."},  # le istruzioni
-    {"role": "user", "content": "domani dentista alle 15 e palestra"},            # l'input
+    {"role": "user", "content": "domani dentista alle 15 e palestra"},  # l'input
 ]
 ```
 
@@ -79,7 +79,7 @@ from ollama import Client
 response = Client(host="http://localhost:11434").chat(
     model="qwen2.5:7b",
     messages=messages,
-    format=ParsedDay.model_json_schema(),   # lo schema della risposta
+    format=ParsedDay.model_json_schema(),  # lo schema della risposta
     options={"temperature": 0.0},
 )
 parsed = ParsedDay.model_validate_json(response.message.content)  # e poi si valida comunque
@@ -270,7 +270,10 @@ Servono Ollama acceso e `qwen2.5:7b` scaricato (`ollama list` per controllare).
 
    client = build_llm_client(Settings())
    messages = [
-       {"role": "system", "content": "Valuta l'umore della frase. Rispondi solo con il JSON richiesto."},
+       {
+           "role": "system",
+           "content": "Valuta l'umore della frase. Rispondi solo con il JSON richiesto.",
+       },
        {"role": "user", "content": "domani ho tre esami e poi il dentista"},
    ]
    print(repr(client.generate(messages, Mood)))

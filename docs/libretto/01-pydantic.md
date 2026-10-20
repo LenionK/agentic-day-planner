@@ -38,12 +38,13 @@ gli spiega anche *come* rispondere, tramite il suo JSON Schema (vedi il
 ```python
 from pydantic import BaseModel, Field
 
+
 class Task(BaseModel):
     id: str
     title: str = Field(min_length=1)
-    required: bool = False                              # valore di default
-    duration_min: int = Field(gt=0, le=720)             # > 0 e <= 720
-    priority: int = Field(default=3, ge=1, le=5)        # tra 1 e 5, di default 3
+    required: bool = False  # valore di default
+    duration_min: int = Field(gt=0, le=720)  # > 0 e <= 720
+    priority: int = Field(default=3, ge=1, le=5)  # tra 1 e 5, di default 3
     deadline_min: int | None = Field(default=None, ge=0, le=1440)  # facoltativo
 ```
 
@@ -87,8 +88,10 @@ singoli e vede l'oggetto intero:
 ```python
 from pydantic import model_validator
 
+
 class Task(BaseModel):
     ...
+
     @model_validator(mode="after")
     def check_window(self) -> "Task":
         if self.earliest_start_min is not None and self.deadline_min is not None:
@@ -120,9 +123,9 @@ non toccarlo, cambiarlo, toglierlo. Con `None` come default, "non toccarlo" e "t
 sembrano uguali. Pydantic però ricorda quali campi sono stati scritti:
 
 ```python
-TaskEdit().model_dump(exclude_unset=True)                  # {}  -> non toccare niente
+TaskEdit().model_dump(exclude_unset=True)  # {}  -> non toccare niente
 TaskEdit(fixed_start=None).model_dump(exclude_unset=True)  # {'fixed_start': None} -> togli l'orario
-TaskEdit().model_dump()                                    # tutti i campi a None: informazione persa
+TaskEdit().model_dump()  # tutti i campi a None: informazione persa
 ```
 
 ### `extra="forbid"`: un campo sconosciuto è un errore
@@ -134,9 +137,11 @@ avvisare. Con `ConfigDict(extra="forbid")` diventa un errore:
 ```python
 from pydantic import ConfigDict
 
+
 class TaskEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
     priority: int | None = Field(default=None, ge=1, le=5)
+
 
 TaskEdit(priorty=2)
 # priorty
@@ -187,7 +192,7 @@ lunga della finestra di tempo sarebbe passata, e il solver avrebbe ricevuto un t
 nessun controllo**, neanche i validator:
 
 ```python
-task.model_copy(update={"duration_min": -5}).duration_min   # -5, nessun errore
+task.model_copy(update={"duration_min": -5}).duration_min  # -5, nessun errore
 Task.model_validate({**task.model_dump(), "duration_min": -5})  # ValidationError
 ```
 
