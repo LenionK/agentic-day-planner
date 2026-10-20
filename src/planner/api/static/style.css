@@ -1,0 +1,142 @@
+/* Un aspetto vicino a quello di Streamlit: colonna centrale, avvisi colorati, bottone rosso.
+   I colori sono variabili (--nome): il tema scuro cambia solo le variabili, non le regole. */
+
+:root {
+  color-scheme: light; /* calendario e orologio dei campi data/ora nei colori giusti */
+  --bg: #ffffff;
+  --bg-raised: #ffffff; /* finestre e notifiche, sopra la pagina */
+  --text: #31333f;
+  --muted: #6b6f7b;
+  --border: #e3e4e8;
+  --surface: #f0f2f6;
+  --primary: #ff4b4b;
+  --link: #0a4a8c;
+  --shadow: rgba(0, 0, 0, 0.12);
+  --info-bg: #e8f1fb;      --info-text: #0a4a8c;
+  --warning-bg: #fff6d9;   --warning-text: #7a5a00;
+  --error-bg: #fdecec;     --error-text: #8a1f26;
+  --success-bg: #e6f6ec;   --success-text: #17643a;
+}
+
+/* tema scuro: quello di Streamlit. Vale se lo chiede il sistema (e l'utente non ha scelto
+   il chiaro col bottone), oppure se l'utente l'ha scelto col bottone (data-theme="dark") */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e1117;
+    --bg-raised: #1a1c24;
+    --text: #fafafa;
+    --muted: #a3a8b8;
+    --border: #3a3d4a;
+    --surface: #262730;
+    --link: #8ab4f8;
+    --shadow: rgba(0, 0, 0, 0.5);
+    --info-bg: rgba(28, 131, 225, 0.2);    --info-text: #c7e5ff;
+    --warning-bg: rgba(255, 193, 7, 0.2);  --warning-text: #fff3b0;
+    --error-bg: rgba(255, 43, 43, 0.2);    --error-text: #ffdede;
+    --success-bg: rgba(33, 195, 84, 0.2);  --success-text: #d4f8df;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1117;
+  --bg-raised: #1a1c24;
+  --text: #fafafa;
+  --muted: #a3a8b8;
+  --border: #3a3d4a;
+  --surface: #262730;
+  --link: #8ab4f8;
+  --shadow: rgba(0, 0, 0, 0.5);
+  --info-bg: rgba(28, 131, 225, 0.2);    --info-text: #c7e5ff;
+  --warning-bg: rgba(255, 193, 7, 0.2);  --warning-text: #fff3b0;
+  --error-bg: rgba(255, 43, 43, 0.2);    --error-text: #ffdede;
+  --success-bg: rgba(33, 195, 84, 0.2);  --success-text: #d4f8df;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 "Source Sans Pro", "Segoe UI", system-ui, sans-serif;
+}
+
+main { max-width: 880px; margin: 0 auto; padding: 24px 16px 64px; }
+
+h1 { font-size: 2.2rem; margin: 0; }
+h2 { font-size: 1.5rem; margin: 28px 0 8px; }
+h3 { font-size: 1.1rem; margin: 18px 0 6px; }
+
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+
+.card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 12px 0; }
+
+label { display: block; margin-bottom: 12px; font-size: 0.9rem; }
+label input[type="text"], label input[type="date"] { display: block; width: 100%; margin-top: 4px; }
+
+input, select, button { font: inherit; color: inherit; }
+input, select { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; background: var(--surface); }
+input:focus, select:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+
+/* bottoni affiancati e allineati a destra, come in Streamlit */
+.buttons { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 12px; }
+button {
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px;
+  background: var(--bg); cursor: pointer;
+}
+button:hover { border-color: var(--primary); color: var(--primary); }
+button.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+button.primary:hover { filter: brightness(0.95); color: #fff; }
+button:disabled { opacity: 0.5; cursor: progress; }
+
+.alert { border-radius: 8px; padding: 10px 14px; margin: 8px 0; }
+.alert.info { background: var(--info-bg); color: var(--info-text); }
+.alert.warning { background: var(--warning-bg); color: var(--warning-text); }
+.alert.error { background: var(--error-bg); color: var(--error-text); }
+.alert.success { background: var(--success-bg); color: var(--success-text); }
+
+.caption { color: var(--muted); font-size: 0.875rem; margin: 4px 0; }
+
+.busy::before { content: "⏳ "; }
+
+/* le tabelle larghe scorrono da sole, la pagina no */
+.table-wrap { overflow-x: auto; margin: 8px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: middle; }
+th { background: var(--surface); font-weight: 600; white-space: nowrap; }
+td input[type="number"] { width: 5.5em; }
+td input[type="time"] { width: 7.5em; }
+
+.metrics { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+.metric { flex: 1 1 200px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+.metric .label { color: var(--muted); font-size: 0.875rem; }
+.metric .value { font-size: 1.6rem; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+
+.check { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+dialog {
+  border: 1px solid var(--border); border-radius: 12px; padding: 0;
+  background: var(--bg-raised); color: var(--text);
+  width: min(760px, calc(100vw - 32px)); max-height: 85vh;
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+dialog > header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px 0; }
+dialog > header h2 { margin: 0; }
+dialog .close { border: none; font-size: 1.2rem; }
+.dialog-body { padding: 8px 20px 20px; overflow-y: auto; }
+
+#toast {
+  position: fixed; right: 16px; bottom: 16px; max-width: 320px;
+  background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 14px; box-shadow: 0 4px 16px var(--shadow);
+}
+
+a { color: var(--link); }
+
+.header-actions { margin-top: 0; align-items: center; }
+.header-actions nav { margin-top: 0; }
+#theme { padding: 6px 10px; }

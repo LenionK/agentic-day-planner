@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agentic Day Planner</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // il tema scelto col bottone, applicato prima di disegnare: niente lampo bianco
+    // all'apertura. Senza una scelta salvata la pagina segue il tema del sistema
+    try {
+      const saved = localStorage.getItem("theme");
+      if (saved === "dark" || saved === "light") document.documentElement.dataset.theme = saved;
+    } catch {}
+  </script>
+</head>
+<body>
+  <main>
+    <header class="top">
+      <h1>Agentic day planner</h1>
+      <div class="buttons header-actions">
+        <!-- le azioni che valgono per tutta l'app; nascoste finché non si sa se il database c'è -->
+        <nav class="buttons" id="actions" hidden>
+          <button type="button" id="open-history">📅 Storico</button>
+          <button type="button" id="open-preferences">🧠 Preferenze</button>
+        </nav>
+        <button type="button" id="theme"></button>
+      </div>
+    </header>
+
+    <div id="banner"></div>
+
+    <!-- dentro un form, Invio nel campo di testo equivale al bottone -->
+    <form id="new-plan" class="card">
+      <label>Giorno
+        <input type="date" id="day" required>
+      </label>
+      <label>Cosa devi fare?
+        <input type="text" id="text" autocomplete="off"
+               placeholder="devo studiare 2 ore, dentista alle 15, se riesco la spesa">
+      </label>
+      <div class="buttons">
+        <button type="submit" class="primary">Pianifica</button>
+      </div>
+    </form>
+
+    <p id="busy" class="busy" hidden></p>
+    <div id="error"></div>
+    <!-- qui app.js disegna la schermata della domanda a cui il grafo aspetta risposta -->
+    <section id="screen"></section>
+  </main>
+
+  <dialog id="history-dialog">
+    <header><h2>Storico</h2><button type="button" class="close" aria-label="Chiudi">✕</button></header>
+    <div class="dialog-body"></div>
+  </dialog>
+
+  <dialog id="preferences-dialog">
+    <header><h2>Preferenze ricordate</h2><button type="button" class="close" aria-label="Chiudi">✕</button></header>
+    <div class="dialog-body"></div>
+  </dialog>
+
+  <div id="toast" hidden></div>
+
+  <!-- type="module": le variabili dello script restano sue, senza toccare quelle globali -->
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

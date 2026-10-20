@@ -2,12 +2,14 @@ from datetime import date
 
 from pydantic import BaseModel
 
-from planner.db.preferences import SimilarPreference
+from planner.db.preferences import SavedPreference, SimilarPreference
 from planner.db.repository import DayAlreadySaved
-from planner.db.store import SavedDay
+from planner.db.store import DaySummary, SavedDay
 from planner.llm.base import LLMClient
 from planner.llm.embedder import EMBED_DIM, Embedder, cosine_similarity
-from planner.solver.models import DayConfig, Schedule, Task
+from planner.solver.models import DayConfig, Schedule, ScheduledTask, Task
+
+SEEN_ON = date(2026, 11, 3)  # la data di prima e ultima volta delle preferenze finte
 
 
 class FakeClient(LLMClient):
@@ -59,6 +61,32 @@ class FakePlanRepository:
             scheduled=sorted(plan.scheduled, key=lambda item: item.start_min),
         )
         return day_id
+
+    def history(self) -> list[DaySummary]:
+        """Like the day_summary view: the saved days, most recent first."""
+        summaries = []
+        for saved in sorted(self.days.values(), key=lambda d: d.day_date, reverse=True):
+            day_minutes = saved.day.day_end_min - saved.day.day_start_min
+            busy = sum(s.end_min - s.start_min for s in saved.scheduled)
+            summaries.append(
+                DaySummary(
+                    id=saved.id,
+                    day_date=saved.day_date,
+                    weekday=saved.day_date.isoweekday(),
+                    user_input=saved.user_input,
+                    day_minutes=day_minutes,
+                    task_count=len(saved.tasks),
+                    required_count=sum(task.required for task in saved.tasks),
+                    busy_minutes=busy,
+                    busy_percent=round(100 * busy / day_minutes),
+                    first_start_min=saved.scheduled[0].start_min if saved.scheduled else None,
+                    last_end_min=saved.scheduled[-1].end_min if saved.scheduled else None,
+                )
+            )
+        return summaries
+
+    def history_plans(self) -> dict[date, list[ScheduledTask]]:
+        return {day_date: saved.scheduled for day_date, saved in self.days.items()}
 
 
 class FakeEmbedder(Embedder):
@@ -128,6 +156,20 @@ class FakePreferenceRepository:
 
     def delete(self, pref_id: int) -> bool:
         return self.rows.pop(pref_id, None) is not None
+
+    def all(self) -> list[SavedPreference]:
+        """Like list_preferences, in insertion order; every preference seen on SEEN_ON."""
+        return [
+            SavedPreference(
+                id=pref_id,
+                text=row["text"],
+                source=row["source"],
+                times_seen=row["times_seen"],
+                first_seen=SEEN_ON,
+                last_seen=SEEN_ON,
+            )
+            for pref_id, row in self.rows.items()
+        ]
 
     def texts(self) -> list[str]:
         return [row["text"] for row in self.rows.values()]

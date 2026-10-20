@@ -33,5 +33,22 @@ class PlanResult(BaseModel):
     step: Literal["done"] = "done"
     plan: dict
     critique: dict
+    # i task confermati, ognuno con "slot" ("09:00–10:30", None se rimasto fuori dal piano):
+    # confermato non vuol dire inserito
+    tasks: list[dict]
+    rejected: list[dict]  # scartati dal parser, con il motivo
     save_result: dict | None = None  # None senza database
     preference_result: dict | None = None  # None se non c'erano preferenze da ricordare
+    # quante preferenze c'erano nella frase; None se il passo non c'è stato (senza database)
+    preference_candidates: int | None = None
+
+
+class SavedDayView(BaseModel):
+    """A saved day in the history: what the user wrote, how full it is, its plan."""
+
+    day_date: date
+    user_input: str
+    day_minutes: int
+    busy_minutes: int
+    free_minutes: int
+    scheduled: list[dict]  # {"title", "start", "end"} in ordine di orario

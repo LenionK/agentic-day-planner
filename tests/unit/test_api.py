@@ -2,6 +2,7 @@ import json
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from icalendar import Calendar
@@ -9,7 +10,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from planner.agents.graph import build_graph
 from planner.api.app import create_app
-from tests.fakes import FakeClient, FakePlanRepository
+from tests.fakes import (
+    FakeClient,
+    FakeEmbedder,
+    FakePlanRepository,
+    FakePreferenceRepository,
+    unit,
+)
 from tests.unit.test_ics import saved_day
 
 RUN = {"title": "Corsa", "category": "attività fisica", "duration_min": 45, "reason": "muoversi"}
@@ -33,13 +40,25 @@ def critic_answer(*suggestions: dict) -> str:
     )
 
 
-def start_api(llm: FakeClient, repository: FakePlanRepository | None = None) -> TestClient:
+def start_api(
+    llm: FakeClient,
+    repository: FakePlanRepository | None = None,
+    preferences: FakePreferenceRepository | None = None,
+) -> TestClient:
     """The API with a graph on the fake LLM. Use it in a `with`: that runs the lifespan.
 
-    The repository, if given, is shared by the graph (saving) and the app (export).
+    The repositories, if given, are shared by the graph (saving, memory) and the app
+    (export, history, preferences); with both, the graph remembers preferences.
     """
-    graph = build_graph(llm, checkpointer=InMemorySaver(), repository=repository)
-    return TestClient(create_app(graph, repository))
+    embedder = FakeEmbedder() if preferences is not None else None
+    graph = build_graph(
+        llm,
+        checkpointer=InMemorySaver(),
+        repository=repository,
+        embedder=embedder,
+        preferences=preferences,
+    )
+    return TestClient(create_app(graph, repository, preferences))
 
 
 def new_plan(client: TestClient, text: str = "studio") -> str:
@@ -239,3 +258,121 @@ def test_export_needs_a_real_date():
         reply = client.get("/days/domani/plan.ics")
 
     assert reply.status_code == 422
+
+
+def test_final_result_lists_the_confirmed_tasks_and_where_they_ended():
+    tasks = [
+        # 200 + 700 minuti: più delle 14 ore della giornata, il progetto resta fuori
+        {"source": "studio", "title": "Studio", "duration_min": 200, "priority": 5},
+        {"source": "progetto", "title": "Progetto", "duration_min": 700, "priority": 1},
+    ]
+    llm = FakeClient([json.dumps({"tasks": tasks}), critic_answer()])
+    with start_api(llm) as client:
+        thread_id = new_plan(client)
+        review = answer(client, thread_id, {"edits": {}})
+        final = answer(client, thread_id, {"accept": True}).json()
+
+    assert review.json()["step"] == "review_plan"
+    # confermati non vuol dire inseriti: il progetto c'è, ma senza orario
+    assert [(t["title"], t["slot"]) for t in final["tasks"]] == [
+        ("Studio", "08:00–11:20"),
+        ("Progetto", None),
+    ]
+    assert final["rejected"] == []
+    assert final["preference_candidates"] is None  # senza memoria il passo non c'è
+
+
+def test_final_result_says_when_the_sentence_had_no_preferences():
+    llm = FakeClient([parser_answer("Studio"), critic_answer(), json.dumps({"preferences": []})])
+    with start_api(llm, FakePlanRepository(), FakePreferenceRepository()) as client:
+        thread_id = new_plan(client)
+        final = answer(client, thread_id, {"edits": {}}).json()
+
+    assert final["preference_candidates"] == 0
+    assert final["preference_result"] is None
+
+
+def test_page_and_its_files_are_served_outside_the_api_docs():
+    with start_api(FakeClient([])) as client:
+        page = client.get("/")
+        script = client.get("/static/app.js")
+        style = client.get("/static/style.css")
+        paths = client.get("/openapi.json").json()["paths"]
+
+    assert page.status_code == 200
+    assert page.headers["content-type"].startswith("text/html")
+    assert 'id="new-plan"' in page.text
+    assert script.status_code == 200
+    assert "javascript" in script.headers["content-type"]
+    assert style.status_code == 200
+    assert "/" not in paths  # la pagina non fa parte dell'API
+
+
+def test_health_says_whether_there_is_a_database():
+    with start_api(FakeClient([])) as without:
+        alone = without.get("/health").json()
+    with start_api(FakeClient([]), FakePlanRepository()) as with_db:
+        saving = with_db.get("/health").json()
+
+    assert alone == {"status": "ok", "database": False, "purged": 0}
+    assert saving["database"] is True
+
+
+def test_history_lists_the_saved_days_with_their_plan():
+    repository = FakePlanRepository(saved_day(), saved_day(date(2026, 11, 1)))
+    with start_api(FakeClient([]), repository) as client:
+        days = client.get("/days").json()
+
+    assert [d["day_date"] for d in days] == ["2026-11-03", "2026-11-01"]  # la più recente prima
+    assert days[0]["user_input"] == "studio, dentista e se riesco palestra"
+    assert days[0]["free_minutes"] == 840 - 150  # giornata 8-22, studio 90 + dentista 60
+    assert days[0]["scheduled"] == [
+        {"title": "Studio", "start": "09:30", "end": "11:00"},
+        {"title": "Dentista", "start": "15:00", "end": "16:00"},
+    ]
+
+
+def test_preferences_can_be_listed_and_forgotten():
+    preferences = FakePreferenceRepository()
+    morning = preferences.add("preferisce studiare la mattina", "studio la mattina", unit(1))
+    preferences.add("evita riunioni il venerdì", "odio le riunioni del venerdì", unit(2))
+    with start_api(FakeClient([]), FakePlanRepository(), preferences) as client:
+        before = client.get("/preferences").json()
+        deleted = client.delete(f"/preferences/{morning}")
+        again = client.delete(f"/preferences/{morning}")
+        after = client.get("/preferences").json()
+
+    assert [p["text"] for p in before] == [
+        "preferisce studiare la mattina",
+        "evita riunioni il venerdì",
+    ]
+    assert before[0]["last_seen"] == "2026-11-03"
+    assert deleted.status_code == 204
+    assert again.status_code == 404
+    assert [p["text"] for p in after] == ["evita riunioni il venerdì"]
+
+
+@pytest.mark.parametrize(
+    ("method", "url"),
+    [("GET", "/days"), ("GET", "/preferences"), ("DELETE", "/preferences/1")],
+)
+def test_history_and_preferences_need_the_database(method, url):
+    with start_api(FakeClient([])) as client:
+        reply = client.request(method, url)
+
+    assert reply.status_code == 503
+
+
+class DownRepository(FakePlanRepository):
+    """A repository whose database stopped answering after the API started."""
+
+    def history(self):
+        raise psycopg.OperationalError("connection refused")
+
+
+def test_database_going_down_after_startup_is_a_clear_503():
+    with start_api(FakeClient([]), DownRepository()) as client:
+        reply = client.get("/days")
+
+    assert reply.status_code == 503
+    assert reply.json() == {"detail": "Database non raggiungibile."}
