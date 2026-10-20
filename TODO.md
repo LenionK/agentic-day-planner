@@ -23,6 +23,10 @@
 
 ## Prossimi passi
 - [ ] **Migliorare l'interfaccia:** oggi alcune cose non si notano (la domanda sulle preferenze arriva solo alla fine e solo se la frase ne contiene una; i messaggi della memoria sono piccoli). Da rivedere: ordine delle schermate, messaggi più chiari, indicare in che passo del flusso si è, testi delle preferenze modificabili nella conferma.
+  - [x] pagina web, revisione con regole di design (euristiche di Nielsen, gerarchia visiva, vicinanza): indicatore dei passi, attesa ed errori accanto al bottone premuto, modulo chiuso in una riga durante la pianificazione con "Nuova pianificazione" che chiede prima di perdere il piano, un'azione principale per schermata (blu; rosso solo per ciò che cancella), piano come linea del tempo con il tempo libero, esito e download in cima al piano finale, dettagli in una sezione richiudibile, niente messaggi doppi, prova a 390 px
+  - [ ] le stesse scelte nell'interfaccia Streamlit (o tenere solo la pagina web)
+  - [ ] la tabella dei task su telefono scorre di lato: valutare una scheda per task
+  - [ ] testi delle preferenze modificabili nella conferma; chiedere le preferenze prima (tocca il grafo, vedi sotto)
 - [ ] **Rivedere quando salvare le preferenze:** oggi si estraggono solo dopo il salvataggio del piano e si confermano in una schermata a parte alla fine; valutare se chiederle insieme alla conferma dei task, se ricavarle anche dal comportamento (task spostati, orari scelti spesso) e cosa fare se l'utente abbandona la domanda.
 - [ ] **Continuare il libretto delle tecnologie (`docs/`):** fatti l'indice e i capitoli 1 (Pydantic), 2 (Ollama e LLM locali) e 10 (FastAPI). Mancano `architettura.md` e i capitoli 3–9 (LangGraph, CP-SAT, Streamlit, PostgreSQL e psycopg, Alembic, embedding e pgvector, test e valutazione). Ogni esempio va provato davvero prima di scriverlo.
 - [ ] Database (PostgreSQL)
@@ -46,7 +50,7 @@
   - [x] export `.ics` della giornata salvata (`export/ics.py`, `GET /days/{data}/plan.ics`): un evento per task del piano, `UID` stabile (data + id), orari con fuso (`TIMEZONE` in `.env`), frase dell'utente nella descrizione; 404 senza piano, 503 senza database
   - [ ] descrizione degli eventi: oggi è la frase originale, che può contraddire un orario corretto a mano ("colazione alle 9" messa alle 8); segnalare quando l'orario è stato cambiato
   - [x] pagina web servita dall'API (`api/static/`: HTML, CSS, JavaScript con `fetch`): le stesse schermate di Streamlit, Storico e Preferenze in finestre `<dialog>`, link al `.ics`, tema scuro (sistema o bottone); testi sempre con `textContent`. Per la pagina: `GET /days`, `GET /preferences`, `DELETE /preferences/{id}`, task confermati con lo slot nel piano finale, pulizia all'avvio, 503 se il DB si spegne dopo l'avvio
-  - [ ] pagina web: regole di design per un'interfaccia più chiara e guidata (vedi "Migliorare l'interfaccia")
+  - [x] pagina web: regole di design per un'interfaccia più chiara e guidata (vedi "Migliorare l'interfaccia")
   - [ ] checkpointer su PostgreSQL: oggi i piani in pausa vivono in memoria e si perdono al riavvio del server
   - [ ] il DB si controlla solo all'avvio: riprovare come fa Streamlit, o dirlo in `/health`
 - [ ] Eval dei modelli (Qwen2.5 7B, Phi-4 mini, Llama 3.1 8B, Aya Expanse 8B) sulla GTX 1060
