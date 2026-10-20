@@ -9,7 +9,9 @@
   --muted: #6b6f7b;
   --border: #e3e4e8;
   --surface: #f0f2f6;
-  --primary: #ff4b4b;
+  /* l'azione principale è blu: il rosso resta per ciò che cancella (danger) e per gli errori */
+  --primary: #3b5bdb;
+  --danger: #c92a2a;
   --link: #0a4a8c;
   --shadow: rgba(0, 0, 0, 0.12);
   --info-bg: #e8f1fb;      --info-text: #0a4a8c;
@@ -30,6 +32,7 @@
     --border: #3a3d4a;
     --surface: #262730;
     --link: #8ab4f8;
+    --danger: #ff8787;
     --shadow: rgba(0, 0, 0, 0.5);
     --info-bg: rgba(28, 131, 225, 0.2);    --info-text: #c7e5ff;
     --warning-bg: rgba(255, 193, 7, 0.2);  --warning-text: #fff3b0;
@@ -46,6 +49,7 @@
   --border: #3a3d4a;
   --surface: #262730;
   --link: #8ab4f8;
+  --danger: #ff8787;
   --shadow: rgba(0, 0, 0, 0.5);
   --info-bg: rgba(28, 131, 225, 0.2);    --info-text: #c7e5ff;
   --warning-bg: rgba(255, 193, 7, 0.2);  --warning-text: #fff3b0;
@@ -54,6 +58,10 @@
 }
 
 * { box-sizing: border-box; }
+
+/* "hidden" nasconde solo se nessuna regola dà un display all'elemento: una classe con
+   display: flex lo renderebbe di nuovo visibile. Così hidden vince sempre */
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -64,7 +72,7 @@ body {
 
 main { max-width: 880px; margin: 0 auto; padding: 24px 16px 64px; }
 
-h1 { font-size: 2.2rem; margin: 0; }
+h1 { font-size: clamp(1.6rem, 6vw, 2.2rem); margin: 0; } /* più piccolo su un telefono */
 h2 { font-size: 1.5rem; margin: 28px 0 8px; }
 h3 { font-size: 1.1rem; margin: 18px 0 6px; }
 
@@ -81,13 +89,18 @@ input:focus, select:focus { outline: 2px solid var(--primary); outline-offset: -
 
 /* bottoni affiancati e allineati a destra, come in Streamlit */
 .buttons { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 12px; }
-button {
-  border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px;
-  background: var(--bg); cursor: pointer;
+/* .button: un link che sembra un bottone (il download del calendario è un link vero) */
+button, .button {
+  display: inline-block; border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px;
+  background: var(--bg); color: var(--text); cursor: pointer; text-decoration: none;
 }
-button:hover { border-color: var(--primary); color: var(--primary); }
-button.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
-button.primary:hover { filter: brightness(0.95); color: #fff; }
+button:hover, .button:hover { border-color: var(--primary); color: var(--primary); }
+/* l'azione principale: una sola per schermata */
+.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.primary:hover { filter: brightness(1.1); color: #fff; }
+/* un'azione che cancella qualcosa: rossa, e mai principale */
+.danger { color: var(--danger); border-color: var(--danger); }
+.danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
 button:disabled { opacity: 0.5; cursor: progress; }
 
 .alert { border-radius: 8px; padding: 10px 14px; margin: 8px 0; }
@@ -99,9 +112,7 @@ button:disabled { opacity: 0.5; cursor: progress; }
 .caption { color: var(--muted); font-size: 0.875rem; margin: 4px 0; }
 
 /* in cima a ogni schermata: il giorno pianificato e i passi, con quello attuale evidenziato */
-.progress { margin: 28px 0 4px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-.progress-day { margin: 0 0 10px; color: var(--muted); }
-.progress-day strong { color: var(--text); }
+.progress { margin: 20px 0 4px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .steps { display: flex; flex-wrap: wrap; gap: 6px 18px; list-style: none; margin: 0; padding: 0; }
 .steps li { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 0.9rem; }
 .steps .dot {
@@ -162,3 +173,42 @@ a { color: var(--link); }
 .header-actions { margin-top: 0; align-items: center; }
 .header-actions nav { margin-top: 0; }
 #theme { padding: 6px 10px; }
+
+/* il modulo chiuso durante la pianificazione: giorno e frase a sinistra, azione a destra */
+.summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.summary .caption { margin: 2px 0 0; }
+.summary-actions { margin-top: 0; align-items: center; }
+
+/* il piano come linea del tempo: orario, poi il task in un blocco; il tempo libero tra i
+   task è più leggero, per vedere a colpo d'occhio dove la giornata respira */
+.timeline { list-style: none; margin: 8px 0; padding: 0; }
+.timeline li { display: grid; grid-template-columns: 7.5em 1fr; gap: 12px; align-items: stretch; }
+.timeline .time { padding: 8px 0; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.9rem; }
+.timeline .slot { margin: 4px 0; }
+.timeline .task {
+  display: flex; justify-content: space-between; gap: 12px; align-items: center;
+  padding: 8px 12px; border-radius: 8px; background: var(--surface);
+  border-left: 4px solid var(--primary);
+}
+.timeline .length { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+.timeline .gap > span:last-child {
+  padding: 2px 12px; color: var(--muted); font-size: 0.8rem; font-style: italic;
+  border-left: 2px dashed var(--border); margin-left: 1px;
+}
+
+.suggestions { list-style: none; margin: 8px 0; padding: 0; }
+.suggestions .card { margin: 8px 0; padding: 10px 14px; }
+.suggestions .card p { margin: 4px 0 0; }
+
+/* i dettagli che servono solo a chi li cerca: una sezione che si apre con un clic */
+details.more { margin: 24px 0 8px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+details.more summary { cursor: pointer; font-weight: 600; }
+details.more[open] summary { margin-bottom: 8px; }
+
+/* su un telefono: margini più stretti, numeri un po' più piccoli */
+@media (max-width: 480px) {
+  main { padding: 16px 12px 48px; }
+  .metric .value { font-size: 1.3rem; }
+  .timeline li { grid-template-columns: 6.5em 1fr; gap: 8px; }
+  .card { padding: 12px; }
+}

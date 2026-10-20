@@ -6,9 +6,13 @@
 const state = {
   threadId: null, // la pianificazione in corso: lo rimandiamo a ogni risposta
   dayDate: null, // il giorno pianificato, per il link al calendario
+  text: null, // la frase della pianificazione in corso
+  done: false, // il grafo è arrivato alla fine: ricominciare non perde niente
   database: false, // se l'API ha il database (piani salvati, storico, preferenze)
 };
 
+const form = document.querySelector("#new-plan");
+const summaryBox = document.querySelector("#summary"); // il modulo chiuso in una riga
 const screenBox = document.querySelector("#screen");
 const errorBox = document.querySelector("#error"); // gli errori del modulo, sotto il modulo
 
@@ -59,11 +63,12 @@ function buttons(...items) {
 }
 
 // onclick riceve il bottone premuto: serve a mostrare l'attesa e gli errori proprio lì,
-// dove l'utente sta guardando
-function button(text, onclick, primary = false) {
+// dove l'utente sta guardando. kind: true o "primary" per l'azione principale della
+// schermata (una sola), "danger" per un'azione che cancella qualcosa.
+function button(text, onclick, kind = null) {
   return el("button", {
     type: "button",
-    class: primary ? "primary" : null,
+    class: kind === true ? "primary" : kind,
     text,
     onclick: (event) => onclick(event.currentTarget),
   });
@@ -175,7 +180,51 @@ async function startPlanning(text, dayDate, origin) {
   }
   state.threadId = result.data.thread_id;
   state.dayDate = dayDate;
+  state.text = text;
+  state.done = false;
+  collapseForm();
   render(result.data);
+}
+
+// Durante una pianificazione il modulo si chiude in una riga: resta chiaro che cosa si sta
+// pianificando, e ricominciare diventa una scelta esplicita, non un invio fatto per sbaglio.
+function collapseForm() {
+  form.hidden = true;
+  const actions = el("div", { class: "buttons summary-actions" },
+    button("Nuova pianificazione", () => askRestart(actions)));
+  summaryBox.replaceChildren(
+    el("div", {},
+      el("strong", { text: longItalianDate(state.dayDate) }),
+      caption(`«${state.text}»`)),
+    actions);
+  summaryBox.hidden = false;
+}
+
+// A piano finito si ricomincia subito; a metà, il piano in corso andrebbe perso: prima si
+// chiede, lì accanto al bottone.
+function askRestart(actions) {
+  if (state.done) {
+    restart();
+    return;
+  }
+  actions.replaceChildren(
+    el("span", { class: "caption", text: "Il piano in corso andrà perso." }),
+    button("Annulla", collapseForm),
+    button("Ricomincia", restart, "danger"));
+}
+
+// Torna al modulo, con la frase di prima già scritta: spesso si vuole solo correggerla.
+function restart() {
+  state.threadId = null;
+  state.done = false;
+  clearErrors();
+  screenBox.replaceChildren();
+  summaryBox.hidden = true;
+  form.hidden = false;
+  const input = document.querySelector("#text");
+  input.value = state.text ?? "";
+  input.focus();
+  input.select();
 }
 
 // Risponde alla domanda in corso. Se la risposta non è valida (422) il grafo resta in pausa:
@@ -211,12 +260,10 @@ const PHASE_OF_STEP = {
   done: 4,
 };
 
-// In cima a ogni schermata: quale giorno si sta pianificando e a che punto si è.
+// In cima a ogni schermata: a che punto si è (il giorno è già nella riga del modulo chiuso).
 function progress(step) {
   const current = PHASE_OF_STEP[step];
   return el("div", { class: "progress" },
-    el("p", { class: "progress-day" },
-      "Pianificazione di ", el("strong", { text: longItalianDate(state.dayDate) })),
     el("ol", { class: "steps", "aria-label": "Passi della pianificazione" },
       ...PHASES.map((name, i) => el("li", {
         class: i < current ? "done" : i === current ? "current" : null,
@@ -227,6 +274,7 @@ function progress(step) {
 // La schermata dipende dalla domanda a cui il grafo aspetta risposta ("step").
 function render(data) {
   clearErrors();
+  state.done = data.step === "done";
   const draw = {
     confirm_tasks: showConfirmation,
     resolve_conflict: showConflict,
@@ -243,14 +291,35 @@ function render(data) {
 
 const TIME_FIELDS = ["fixed_start", "earliest_start", "deadline"];
 
-function showSchedule(plan) {
-  const parts = [];
-  if (plan.scheduled.length) {
-    parts.push(table(["Dalle", "Alle", "Task"], plan.scheduled.map((s) => [s.start, s.end, s.title])));
-  } else {
-    parts.push(notice("info", "Nessun task nel piano."));
-  }
-  if (plan.unscheduled.length) {
+const minutesOf = (hhmm) => {
+  const [hours, minutes] = hhmm.split(":").map(Number);
+  return hours * 60 + minutes;
+};
+
+// Il piano come linea del tempo: orari a sinistra, task a destra e, tra un task e l'altro,
+// il tempo libero. La giornata si legge dall'alto in basso, come in un'agenda.
+function timeline(scheduled) {
+  if (!scheduled.length) return notice("info", "Nessun task nel piano.");
+  const items = [];
+  scheduled.forEach((slot, i) => {
+    const gap = i > 0 ? minutesOf(slot.start) - minutesOf(scheduled[i - 1].end) : 0;
+    if (gap > 0) {
+      items.push(el("li", { class: "gap" },
+        el("span", { class: "time" }), el("span", { text: `libero ${durationText(gap)}` })));
+    }
+    items.push(el("li", { class: "slot" },
+      el("span", { class: "time", text: `${slot.start}–${slot.end}` }),
+      el("span", { class: "task" },
+        el("strong", { text: slot.title }),
+        el("span", { class: "length", text: durationText(minutesOf(slot.end) - minutesOf(slot.start)) }))));
+  });
+  return el("ol", { class: "timeline" }, ...items);
+}
+
+// unscheduled: false dove la domanda stessa parla dei task rimasti fuori (niente doppioni)
+function showSchedule(plan, { unscheduled = true } = {}) {
+  const parts = [timeline(plan.scheduled)];
+  if (unscheduled && plan.unscheduled.length) {
     parts.push(notice("warning", `Non inseriti: ${plan.unscheduled.join(", ")}`));
   }
   return parts;
@@ -264,8 +333,8 @@ function showRejected(summary) {
   return summary.rejected.map((r) => notice("error", `Scartato: ${r.title} (${r.reason})`));
 }
 
-function showPlan(plan) {
-  return [heading("Piano della giornata"), ...showSchedule(plan), ...showWarnings(plan)];
+function showPlan(plan, options) {
+  return [heading("Piano della giornata"), ...showSchedule(plan, options), ...showWarnings(plan)];
 }
 
 // La tabella modificabile dei task. Restituisce la tabella e una funzione che legge,
@@ -376,8 +445,10 @@ function showReview(plan) {
   const missing = plan.unscheduled;
   const verb = missing.length === 1 ? "non entra" : "non entrano";
   return [
-    ...showPlan(plan),
-    el("p", {}, el("strong", { text: missing.join(", ") }), ` ${verb} nella giornata. Ti va bene così?`),
+    ...showPlan(plan, { unscheduled: false }),
+    // un messaggio solo, che è anche la domanda: niente "Non inseriti" ripetuto sopra
+    el("div", { class: "alert warning" },
+      el("strong", { text: missing.join(", ") }), ` ${verb} nella giornata. Ti va bene così?`),
     buttons(
       button("Continua senza modifiche", (origin) =>
         answer({ accept: true }, "Risposta non valida", origin), true),
@@ -416,11 +487,17 @@ function showSuggestions(question) {
     ...showPlan(question.plan), // il piano su cui il Critico si esprime
     heading("Il Critico"),
     ...showCritique(question),
-    el("p", { text: "Attività che potresti aggiungere:" }),
-    table(["Attività", "Categoria", "Durata (min)", "Perché"],
-      question.suggestions.map((s) => [s.title, s.category, s.duration_min, s.reason])),
+    el("h3", { text: "Suggerimenti del Critico" }),
+    // per ora non si possono aggiungere al piano (manca il passo nel grafo): dirlo, invece
+    // di mostrare qualcosa che sembra cliccabile
+    caption("Per ora sono solo idee: se ti interessano, aggiungile alla prossima frase."),
+    el("ul", { class: "suggestions" }, ...question.suggestions.map((s) => el("li", { class: "card" },
+      el("div", { class: "row" },
+        el("strong", { text: s.title }),
+        el("span", { class: "caption", text: `${s.category} · ${durationText(s.duration_min)}` })),
+      el("p", { class: "caption", text: s.reason })))),
     ...showWarnings(question),
-    buttons(button("Va bene così", (origin) =>
+    buttons(button("Continua", (origin) =>
       answer({ accepted: [] }, "Risposta non valida", origin), true)),
   ];
 }
@@ -453,32 +530,23 @@ function showPreferencesConfirmation(question) {
   ];
 }
 
-function showSaveResult(saved) {
-  if (saved === null) return [notice("success", "✅ Piano confermato.")]; // senza database
-  if (!saved.saved) return [notice("warning", `⚠️ ${saved.message}`)]; // non salvato: va notato
-  return [
-    notice("success", `✅ ${saved.message}`),
-    el("p", {}, el("a", { href: `/days/${state.dayDate}/plan.ics`, text: "📥 Scarica nel calendario (.ics)" })),
-  ];
-}
-
-function showFinal(result) {
-  const yes = (value) => (value ? "✓" : "");
-  const parts = [
-    ...showPlan(result.plan),
-    heading("Il Critico"),
-    ...showCritique(result.critique),
-    heading("Task confermati"),
-    // confermati non vuol dire inseriti: la prima colonna dice dove è finito ognuno
-    table(
-      ["Nel piano", "Titolo", "Durata (min)", "Priorità", "Obbligatorio", "Inizio", "Dopo le", "Entro le"],
-      result.tasks.map((t) => [t.slot ?? "non inserito", t.title, t.duration_min, t.priority,
-        yes(t.required), t.fixed_start ?? "", t.earliest_start ?? "", t.deadline ?? ""]),
-    ),
-    ...showRejected(result),
-    el("hr"),
-    ...showSaveResult(result.save_result),
-  ];
+// L'esito, in cima al piano finale: è la cosa più importante, e il download è l'azione
+// principale della schermata.
+function showOutcome(result) {
+  const saved = result.save_result;
+  const parts = [];
+  if (saved === null) {
+    parts.push(notice("success", "✅ Piano confermato (senza database non viene salvato)."));
+  } else if (!saved.saved) {
+    parts.push(notice("warning", `⚠️ ${saved.message}`)); // non salvato: va notato
+  } else {
+    parts.push(notice("success", `✅ ${saved.message}`));
+    parts.push(el("div", { class: "buttons" }, el("a", {
+      class: "button primary",
+      href: `/days/${state.dayDate}/plan.ics`,
+      text: "📥 Scarica nel calendario",
+    })));
+  }
   // il passaggio delle preferenze si vede sempre, anche quando non c'era niente da chiedere
   if (result.preference_candidates !== null) {
     const message = result.preference_result?.message;
@@ -488,6 +556,29 @@ function showFinal(result) {
     } else parts.push(caption("🧠 Nessuna preferenza ricordata."));
   }
   return parts;
+}
+
+function showFinal(result) {
+  const yes = (value) => (value ? "✓" : "");
+  // salvato, il messaggio nomina già i task rimasti fuori: nel piano non si ripetono
+  const unscheduled = !result.save_result?.saved;
+  return [
+    heading("Il piano è pronto"),
+    ...showOutcome(result),
+    ...showPlan(result.plan, { unscheduled }),
+    heading("Il Critico"),
+    ...showCritique(result.critique),
+    // i dettagli servono a chi li cerca: chiusi, non allungano la pagina
+    el("details", { class: "more" },
+      el("summary", { text: `Dettagli dei task confermati (${result.tasks.length})` }),
+      // confermati non vuol dire inseriti: la prima colonna dice dove è finito ognuno
+      table(
+        ["Nel piano", "Titolo", "Durata (min)", "Priorità", "Obbligatorio", "Inizio", "Dopo le", "Entro le"],
+        result.tasks.map((t) => [t.slot ?? "non inserito", t.title, t.duration_min, t.priority,
+          yes(t.required), t.fixed_start ?? "", t.earliest_start ?? "", t.deadline ?? ""]),
+      ),
+      ...showRejected(result)),
+  ];
 }
 
 // ---------------------------------------------------------------- le finestre
@@ -516,9 +607,7 @@ async function fillHistory(body) {
       ` · tempo libero ${durationText(day.free_minutes)} · `,
       el("a", { href: `/days/${day.day_date}/plan.ics`, text: "📥 .ics" })),
     caption(`«${day.user_input}»`),
-    day.scheduled.length
-      ? table(["Dalle", "Alle", "Task"], day.scheduled.map((s) => [s.start, s.end, s.title]))
-      : notice("info", "Nessun task nel piano."),
+    timeline(day.scheduled),
   ]));
 }
 
@@ -545,7 +634,7 @@ async function fillPreferences(body) {
         el("div", {},
           el("strong", { text: pref.text }),
           caption(`Vista ${times} · ultima il ${italianDate(pref.last_seen)} · «${pref.source}»`)),
-        button("Elimina", () => remove(pref.id)));
+        button("Elimina", () => remove(pref.id), "danger"));
     }),
   );
 }
@@ -600,7 +689,7 @@ async function start() {
   tomorrow.setDate(tomorrow.getDate() + 1);
   document.querySelector("#day").value = isoDate(tomorrow);
 
-  document.querySelector("#new-plan").addEventListener("submit", (event) => {
+  form.addEventListener("submit", (event) => {
     event.preventDefault(); // niente ricarica: la richiesta la fa fetch, in JSON
     const text = document.querySelector("#text").value.trim();
     if (!text) {
