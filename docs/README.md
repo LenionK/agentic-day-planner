@@ -44,7 +44,7 @@ Ogni capitolo si legge anche da solo, ma i rimandi presuppongono questo ordine.
 | 7 | [Alembic](libretto/07-alembic.md) | 1.20.0 | Migrazioni del database versionate, upgrade e downgrade |
 | 8 | [Embedding e pgvector](libretto/08-embedding-pgvector.md) | `nomic-embed-text`, immagine `pgvector/pgvector:pg16` | Trasformare frasi in vettori, similarità coseno, ricerca nel database, i limiti dei vettori |
 | 9 | [Test e valutazione](libretto/09-test-e-valutazione.md) | pytest 9.1.1 | Test unitari e di integrazione, oggetti finti, test dell'interfaccia, misurare un LLM |
-| 10 | [FastAPI](libretto/10-fastapi.md) | fastapi 0.143.0, uvicorn 0.54.0 | Un'API web: endpoint, validazione delle richieste, codici di stato, una conversazione con il grafo in più richieste |
+| 10 | [FastAPI](libretto/10-fastapi.md) | fastapi 0.143.0, uvicorn 0.54.0 | Un'API web: endpoint, validazione delle richieste, codici di stato, una conversazione con il grafo in più richieste, un file da scaricare, una pagina web che la usa |
 
 Le versioni sono quelle installate nel progetto. Contano: librerie come LangGraph e
 Streamlit cambiano spesso, e un esempio scritto per un'altra versione può non funzionare.

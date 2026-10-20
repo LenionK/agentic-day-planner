@@ -247,6 +247,71 @@ assert reply.status_code == 200
 posto di Ollama i test girano in pochi secondi e danno sempre lo stesso risultato
 ([capitolo 9](09-test-e-valutazione.md)).
 
+### Gli altri endpoint: storico, preferenze, errori del database
+
+Per fare tutto quello che fa Streamlit, all'API servono anche:
+
+| Endpoint | Cosa fa |
+|---|---|
+| `GET /days` | le giornate salvate, la più recente prima, ognuna con il suo piano (lo Storico) |
+| `GET /preferences` | le preferenze ricordate |
+| `DELETE /preferences/{id}` | dimentica una preferenza: **204** (fatto, risposta senza corpo) o 404 |
+
+**DELETE** è il metodo HTTP per cancellare, e **204 No Content** è la risposta di chi ha fatto
+quello che gli si chiedeva e non ha niente da restituire: si ottiene con
+`@app.delete(..., status_code=204)` e una funzione che non restituisce niente.
+
+Un database che si spegne **dopo** l'avvio fa sollevare a psycopg un `OperationalError` in
+mezzo a una richiesta. Senza fare niente, il client riceverebbe un generico 500. Un
+**gestore di eccezioni** lo trasforma una volta per tutte, per ogni endpoint:
+
+```python
+@app.exception_handler(psycopg.OperationalError)
+def database_down(request: Request, exc: psycopg.OperationalError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": "Database non raggiungibile."})
+```
+
+### Una pagina web: un altro client della stessa API
+
+Su `http://127.0.0.1:8000/` l'API serve una pagina con le stesse schermate di Streamlit. La
+pagina **non ha niente di speciale**: è un client come i test, `/docs` o PowerShell, e ogni
+passo è una richiesta all'API. È la prova che la separazione funziona.
+
+È fatta di tre file in [api/static/](../../src/planner/api/static/):
+
+- `index.html` (la struttura), servito su `/` con `FileResponse` e `include_in_schema=False`
+  (la pagina non fa parte dell'API, quindi non compare in `/docs`);
+- `style.css` (l'aspetto) e `app.js` (il comportamento), serviti da
+  `app.mount("/static", StaticFiles(directory=STATIC))`, che rende raggiungibili tutti i
+  file di una cartella.
+
+Le idee di JavaScript che servono, confrontate con Python:
+
+| JavaScript | Python | Cosa fa |
+|---|---|---|
+| `await fetch("/plans", {method: "POST", body: ...})` | `client.post("/plans", json=...)` | manda una richiesta e aspetta la risposta |
+| `JSON.stringify(x)` / `await response.json()` | `json.dumps(x)` / `response.json()` | oggetto ↔ testo JSON |
+| `document.querySelector("#text")` | — | trova un elemento della pagina |
+| `form.addEventListener("submit", f)` | — | "quando il modulo viene inviato, chiama f" |
+| `event.preventDefault()` | — | blocca il comportamento normale (il form ricaricherebbe la pagina) |
+
+Tre scelte da notare in `app.js`:
+
+- **`textContent`, mai `innerHTML`.** Ogni testo (la frase dell'utente, i titoli e i commenti
+  dell'LLM) entra nella pagina come testo. Con `innerHTML` un titolo come
+  `<img src=x onerror=...>` diventerebbe codice eseguito dal browser: è l'attacco chiamato
+  *cross-site scripting* (XSS). Nella prova del libretto un titolo `Progetto <b>lungo</b>`
+  compare così com'è, con i simboli visibili.
+- **`<script type="module">`.** Le variabili dello script restano sue: `alert` o `screen`,
+  che il browser ha già come nomi globali, non vengono toccati.
+- **Stessa origine.** La pagina e l'API stanno sullo stesso indirizzo, quindi il browser
+  permette le richieste senza configurare il CORS (che servirebbe se la pagina stesse altrove).
+
+Le finestre Storico e Preferenze sono elementi `<dialog>` aperti con `showModal()`: una
+finestra modale che si chiude con Esc. Il **tema scuro** cambia solo le variabili dei
+colori (`--bg`, `--text`...): segue il tema del sistema (`prefers-color-scheme`), oppure la
+scelta fatta col bottone 🌙/☀️, salvata nel browser con `localStorage`.
+
 ## Dove guardare nel codice
 
 - [api/app.py](../../src/planner/api/app.py): `create_app` con lifespan ed endpoint;
@@ -255,6 +320,9 @@ posto di Ollama i test girano in pochi secondi e danno sempre lo stesso risultat
 - [api/schemas.py](../../src/planner/api/schemas.py): i modelli di richieste e risposte, il
   "contratto" dell'API.
 - [export/ics.py](../../src/planner/export/ics.py): la giornata salvata come file `.ics`.
+- [api/static/app.js](../../src/planner/api/static/app.js): la pagina web; `api()` per le
+  richieste, `render()` sceglie la schermata dallo `step`, `diffEdits()` manda solo i campi
+  cambiati (come `diff_edits` di Streamlit).
 - [tests/unit/test_api.py](../../tests/unit/test_api.py): i test, compreso un piano
   completo, una risposta sbagliata seguita da quella giusta, il salvataggio con un archivio
   finto e lo stesso piano scaricato come calendario.
@@ -317,7 +385,8 @@ gli accenti si vedono bene.
 ### Limiti che restano (per ora)
 
 - **Il database si controlla solo all'avvio.** Se Docker si accende dopo, serve riavviare il
-  server; Streamlit invece riprova a ogni interazione.
+  server; Streamlit invece riprova a ogni interazione. (Se invece si spegne dopo, le
+  richieste ricevono un 503 chiaro.)
 - **I grafi in pausa vivono in memoria** (`InMemorySaver`): se il server si riavvia, le
   pianificazioni a metà si perdono, e con più processi uvicorn ognuno avrebbe la sua memoria.
   Un checkpointer su PostgreSQL risolverebbe entrambi i problemi.
@@ -325,21 +394,26 @@ gli accenti si vedono bene.
 ## Prova tu
 
 1. **Il server e `/docs`.** Avvia uvicorn con Ollama acceso e apri
-   `http://127.0.0.1:8000/docs`. *Verifica:* ci sono quattro endpoint (`GET /health`,
-   `POST /plans`, `POST /plans/{thread_id}/resume`, `GET /days/{day_date}/plan.ics`) e,
-   sotto, i modelli `PlanRequest`, `PlanQuestion`, `ResumeRequest`, `PlanResult`.
-2. **Una pianificazione completa dal browser.** In `/docs`, `POST /plans` → *Try it out* con
+   `http://127.0.0.1:8000/docs`. *Verifica:* ci sono sette endpoint (`GET /health`,
+   `POST /plans`, `POST /plans/{thread_id}/resume`, `GET /days`, `GET /days/{day_date}/plan.ics`,
+   `GET /preferences`, `DELETE /preferences/{pref_id}`) e, sotto, i modelli `PlanRequest`,
+   `PlanQuestion`, `ResumeRequest`, `PlanResult`, `SavedDayView`. La pagina `/` non c'è.
+2. **La pagina web.** Apri `http://127.0.0.1:8000/` e pianifica una giornata. Poi premi
+   **F12**, scheda **Rete** (*Network*), e ripeti: ogni schermata è una richiesta a `plans`
+   o a `resume`, con il JSON che hai visto in `/docs`. *Verifica:* la conversazione è la
+   stessa, cambia solo chi la disegna.
+3. **Una pianificazione completa da `/docs`.** In `/docs`, `POST /plans` → *Try it out* con
    `{"text": "domani dentista alle 15, poi se riesco palestra", "day_date": "2026-11-03"}` →
    *Execute*. Copia il `thread_id`, poi rispondi con `POST /plans/{thread_id}/resume`
    seguendo la tabella degli `step` finché non ottieni `"done"`. *Verifica:* ogni risposta ha
    lo stesso `thread_id`; alla fine ci sono `plan` e `critique`.
-3. **Correggere l'LLM via API.** Nella prova reale per questo libretto il modello ha dato
+4. **Correggere l'LLM via API.** Nella prova reale per questo libretto il modello ha dato
    priorità 3 alla palestra, nonostante "se riesco". Alla prima domanda rispondi con
    `{"answer": {"edits": {"t2": {"priority": 1}}}}` (controlla prima che la palestra sia
    davvero `t2`). *Verifica:* la risposta arriva con `200`, e la correzione è stata applicata.
-4. **Gli errori.** Sulla stessa pianificazione prova `{"answer": {}}`, poi `"alle tre"` come
+5. **Gli errori.** Sulla stessa pianificazione prova `{"answer": {}}`, poi `"alle tre"` come
    orario, poi un `thread_id` inventato. *Verifica:* 422 sul corpo, 422 sull'orario, 404.
-5. **Da PowerShell.** Con il server acceso:
+6. **Da PowerShell.** Con il server acceso:
 
    ```powershell
    $q = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/plans -ContentType "application/json" -Body '{"text": "domani dentista alle 15, poi se riesco palestra", "day_date": "2026-11-03"}'
@@ -349,13 +423,13 @@ gli accenti si vedono bene.
 
    *Verifica:* `confirm_tasks` e la tabella dei task. È lo stesso JSON di `/docs`, letto da
    un altro client: l'API non sa chi la sta usando.
-6. **Nel calendario.** Apri nel browser `http://127.0.0.1:8000/days/AAAA-MM-GG/plan.ics` con
+7. **Nel calendario.** Apri nel browser `http://127.0.0.1:8000/days/AAAA-MM-GG/plan.ics` con
    una data che hai salvato (la trovi nello 📅 Storico di Streamlit) e importa il file nel tuo
    calendario (in Google Calendar: *Impostazioni → Importa ed esporta*). *Verifica:* gli
    eventi sono all'ora giusta e hanno la tua frase nella descrizione. Poi importa lo stesso
    file una seconda volta e guarda come si comporta la tua app con gli `UID` già visti:
    aggiorna o duplica?
-7. **I test che possono fallire.** In [app.py](../../src/planner/api/app.py) togli il
+8. **I test che possono fallire.** In [app.py](../../src/planner/api/app.py) togli il
    controllo `if not snapshot.next:` (con la sua riga `raise`) ed esegui
    `python -m pytest tests/unit/test_api.py`. *Verifica:* fallisce solo
    `test_answer_after_the_end_is_a_conflict`. Rimetti il controllo.

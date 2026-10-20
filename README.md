@@ -163,16 +163,21 @@ says so); as soon as the database answers, the app uses it. On a GTX 1060 6GB ea
 about 5–15 seconds; the solver and the embeddings are fast. The interface is in Italian, like the
 prompts. After changing the code, restart Streamlit: the graph is cached.
 
-### API
+### Web page and API
 
-The same graph is available as a REST API (FastAPI):
+The same graph is available as a REST API (FastAPI), with a web page that uses it:
 
 ```bash
 python -m uvicorn planner.api.app:app --reload
 ```
 
-The interactive documentation is at <http://127.0.0.1:8000/docs>. A plan is a conversation of
-a few requests:
+- <http://127.0.0.1:8000/> is the **web page**: the same screens as the Streamlit interface
+  (task table, plan review, critic, preferences, final plan), the 📅 Storico and 🧠 Preferenze
+  windows, a *Scarica nel calendario* link for the saved plan, and a dark theme (it follows the
+  system, or the 🌙/☀️ button). Every screen is a request to the API.
+- <http://127.0.0.1:8000/docs> is the interactive **API documentation**.
+
+A plan is a conversation of a few requests:
 
 | Request | What it does |
 |---------|--------------|
@@ -180,12 +185,16 @@ a few requests:
 | `POST /plans` with `{"text": ..., "day_date": "2026-11-03"}` | starts the graph; returns a `thread_id` and the first question (`step`) |
 | `POST /plans/{thread_id}/resume` with `{"answer": {...}}` | answers the question; returns the next one, or `"step": "done"` with plan, critique and save result |
 | `GET /days/{day_date}/plan.ics` | the saved plan of a day as an iCalendar file, to import into any calendar app (404 if the day has no plan, 503 without the database) |
+| `GET /days` | the saved days, most recent first, each with its plan |
+| `GET /preferences`, `DELETE /preferences/{id}` | the remembered preferences; delete one (204, or 404 if it does not exist) |
 
 The answer has the format of the question: `{"edits": {}}` to confirm the tasks,
 `{"accept": true}` for the plan review, `{"accepted": [0]}` for the suggestions,
 `{"keep": [0], "delete": []}` for the preferences. Invalid answers get a 422 and the question
 stays open; an unknown `thread_id` gets a 404, a finished plan a 409. Paused plans live in memory:
-they are lost when the server restarts.
+they are lost when the server restarts. As in Streamlit, days older than two weeks are deleted at
+startup (`/health` says how many), and without the database plans are not saved; if the database
+stops answering later, requests that need it get a 503.
 
 The calendar events are in the time zone set by `TIMEZONE` in `.env` (default `Europe/Rome`); each
 event has a stable UID (date + task id), so a calendar can tell a re-imported event from a new one.
@@ -246,7 +255,7 @@ src/planner/
   llm/      LLMClient and Embedder interfaces, Ollama and LangChain clients, factory
   db/       store and preferences (SQL), repository (what the graph uses), Alembic migrations
   ui/       Streamlit interface and edit diffing
-  api/      FastAPI app (endpoints) and request/response models
+  api/      FastAPI app (endpoints), request/response models, static/ web page (HTML, JS, CSS)
   export/   a saved day as an iCalendar (.ics) file
   dates.py  dates in Italian
   config.py settings from .env
@@ -261,14 +270,14 @@ docs/          booklet on the technologies used, in Italian
 
 Working: parser, user confirmation and edits, scheduler, conflict resolution, plan review, day
 critic with suggestions, PostgreSQL storage with merge or replace of a saved day, history and
-purge of old days, memory of preferences with pgvector, Streamlit interface, REST API with FastAPI and `.ics` export.
+purge of old days, memory of preferences with pgvector, Streamlit interface, REST API with FastAPI,
+`.ics` export, and a web page served by the API.
 
 Next:
 
-- **Interface**: a clearer, more guided interface
+- **Interface**: a clearer, more guided design for the web page
 - **Preferences**: review when they are saved, review the vector search, make the critic's use
   of them more reliable
-- A small web page served by the API, to try it as a user would
 - A PostgreSQL checkpointer, so paused plans survive a restart of the API
 - Model comparison on the same evaluation set
 
