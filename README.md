@@ -179,12 +179,16 @@ a few requests:
 | `GET /health` | whether the API is up and the database answered at startup |
 | `POST /plans` with `{"text": ..., "day_date": "2026-11-03"}` | starts the graph; returns a `thread_id` and the first question (`step`) |
 | `POST /plans/{thread_id}/resume` with `{"answer": {...}}` | answers the question; returns the next one, or `"step": "done"` with plan, critique and save result |
+| `GET /days/{day_date}/plan.ics` | the saved plan of a day as an iCalendar file, to import into any calendar app (404 if the day has no plan, 503 without the database) |
 
 The answer has the format of the question: `{"edits": {}}` to confirm the tasks,
 `{"accept": true}` for the plan review, `{"accepted": [0]}` for the suggestions,
 `{"keep": [0], "delete": []}` for the preferences. Invalid answers get a 422 and the question
 stays open; an unknown `thread_id` gets a 404, a finished plan a 409. Paused plans live in memory:
 they are lost when the server restarts.
+
+The calendar events are in the time zone set by `TIMEZONE` in `.env` (default `Europe/Rome`); each
+event has a stable UID (date + task id), so a calendar can tell a re-imported event from a new one.
 
 ### Database
 
@@ -243,6 +247,7 @@ src/planner/
   db/       store and preferences (SQL), repository (what the graph uses), Alembic migrations
   ui/       Streamlit interface and edit diffing
   api/      FastAPI app (endpoints) and request/response models
+  export/   a saved day as an iCalendar (.ics) file
   dates.py  dates in Italian
   config.py settings from .env
 tests/
@@ -256,14 +261,15 @@ docs/          booklet on the technologies used, in Italian
 
 Working: parser, user confirmation and edits, scheduler, conflict resolution, plan review, day
 critic with suggestions, PostgreSQL storage with merge or replace of a saved day, history and
-purge of old days, memory of preferences with pgvector, Streamlit interface, REST API with FastAPI.
+purge of old days, memory of preferences with pgvector, Streamlit interface, REST API with FastAPI and `.ics` export.
 
 Next:
 
 - **Interface**: a clearer, more guided interface
 - **Preferences**: review when they are saved, review the vector search, make the critic's use
   of them more reliable
-- `.ics` export through the API; a PostgreSQL checkpointer so paused plans survive a restart
+- A small web page served by the API, to try it as a user would
+- A PostgreSQL checkpointer, so paused plans survive a restart of the API
 - Model comparison on the same evaluation set
 
 See [TODO.md](TODO.md) for details and design decisions, and [CHANGELOG.md](CHANGELOG.md) for

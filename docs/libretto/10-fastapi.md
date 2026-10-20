@@ -39,6 +39,7 @@ from fastapi import FastAPI
 
 app = FastAPI(title="Agentic Day Planner")
 
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
@@ -79,9 +80,9 @@ class PlanRequest(BaseModel):
     text: str = Field(min_length=1)
     day_date: date
 
+
 @app.post("/plans")
-def start_plan(body: PlanRequest) -> PlanQuestion:
-    ...
+def start_plan(body: PlanRequest) -> PlanQuestion: ...
 ```
 
 Siccome `body` è un `BaseModel`, FastAPI capisce che arriva dal corpo JSON e lo valida. Se
@@ -109,10 +110,15 @@ Il codice di stato dice al client com'è andata, prima ancora di leggere la risp
 
 | Codice | Significato | Nel progetto |
 |---|---|---|
-| 200 | tutto bene | domanda successiva o piano finito |
-| 404 | non trovato | nessuna pianificazione con quel `thread_id` |
+| 200 | tutto bene | domanda successiva, piano finito, file del calendario |
+| 404 | non trovato | nessuna pianificazione con quel `thread_id`, nessun piano salvato per quella data |
+| 405 | metodo non permesso | l'indirizzo esiste ma con un altro metodo: una GET su `/plans`, che accetta solo POST |
 | 409 | conflitto con lo stato attuale | la pianificazione è finita, non aspetta risposte |
-| 422 | dati non validi | corpo sbagliato, o risposta che il grafo rifiuta |
+| 422 | dati non validi | corpo sbagliato, data non valida, o risposta che il grafo rifiuta |
+| 503 | servizio non disponibile | il database è spento: non ci sono piani salvati da esportare |
+
+404 e 503 sembrano simili, ma dicono cose diverse: con 404 il database c'è e per quella data
+non c'è niente; con 503 la richiesta è giusta, ma manca un servizio che serve per rispondere.
 
 Per rispondere con un errore si **solleva** un'eccezione:
 
@@ -134,6 +140,7 @@ all'avvio, quello dopo alla chiusura. `app.state` è un contenitore dove metterl
 async def lifespan(app: FastAPI):
     app.state.graph = build_planner_graph(...)
     yield
+
 
 app = FastAPI(lifespan=lifespan)
 ```
@@ -185,6 +192,47 @@ FastAPI descrive l'API in un formato standard (*OpenAPI*, visibile su `/openapi.
 ricava la pagina `/docs`: ogni endpoint con i suoi modelli, e il bottone "Try it out" per
 mandare richieste vere dal browser. I modelli Pydantic compaiono nella sezione *Schemas*.
 
+### Rispondere con un file: l'export `.ics`
+
+`GET /days/2026-11-03/plan.ics` restituisce il piano salvato di quel giorno come file
+**iCalendar**, il formato standard che leggono tutte le app di calendario. Il file è fatto di
+blocchi `BEGIN:`/`END:`: un `VCALENDAR` che contiene un `VEVENT` per ogni task del piano, con
+titolo (`SUMMARY`), inizio e fine (`DTSTART`, `DTEND`), la frase dell'utente
+(`DESCRIPTION`) e un identificativo (`UID`). Lo scrive la libreria **icalendar**, che si
+occupa delle regole scomode del formato: righe che finiscono con `\r\n`, righe lunghe spezzate,
+virgole e punti e virgola da far precedere da `\`.
+
+Tre scelte che vale la pena notare in
+[export/ics.py](../../src/planner/export/ics.py):
+
+- **`UID` stabile**, costruito da data e id del task (`2026-11-03-t1@agentic-day-planner`):
+  è il modo standard per dire al calendario "è lo stesso evento di prima", così un file
+  importato di nuovo può aggiornare gli eventi invece di duplicarli (quanto lo rispetti,
+  dipende dall'app).
+- **Orari con il fuso** (`DTSTART;TZID=Europe/Rome:20261103T093000`), non "fluttuanti": ogni
+  app li mette all'ora giusta, anche con l'ora legale. Il fuso si sceglie con `TIMEZONE` in
+  `.env`; il blocco `VTIMEZONE` che lo descrive lo genera `add_missing_timezones()`.
+- **L'ora "iniettata"**: `DTSTAMP` (quando è stato creato il file) cambia a ogni esecuzione,
+  quindi la funzione riceve `now` come parametro e i test le passano una data fissa.
+
+Per l'endpoint, la novità è che la risposta non è JSON. Si restituisce direttamente un
+`Response` con i bytes del file:
+
+```python
+return Response(
+    content=day_to_ics(saved, app.state.timezone),
+    media_type="text/calendar",
+    headers={"Content-Disposition": f'attachment; filename="piano-{day_date}.ics"'},
+)
+```
+
+- `media_type` è il **tipo MIME**: dice al client cosa contengono i bytes. Con
+  `text/calendar` un telefono propone di aprire il file con l'app del calendario.
+- `Content-Disposition: attachment` dice al browser di **scaricare** il file con quel nome,
+  invece di mostrarlo come testo.
+- Il parametro `day_date: date` nel percorso viene convertito e validato come un corpo JSON:
+  `/days/domani/plan.ics` dà 422.
+
 ### `TestClient`: provare l'API senza server
 
 ```python
@@ -206,9 +254,12 @@ posto di Ollama i test girano in pochi secondi e danno sempre lo stesso risultat
   risultato del grafo in domanda o piano finito.
 - [api/schemas.py](../../src/planner/api/schemas.py): i modelli di richieste e risposte, il
   "contratto" dell'API.
+- [export/ics.py](../../src/planner/export/ics.py): la giornata salvata come file `.ics`.
 - [tests/unit/test_api.py](../../tests/unit/test_api.py): i test, compreso un piano
-  completo, una risposta sbagliata seguita da quella giusta e il salvataggio con un archivio
-  finto.
+  completo, una risposta sbagliata seguita da quella giusta, il salvataggio con un archivio
+  finto e lo stesso piano scaricato come calendario.
+- [tests/unit/test_ics.py](../../tests/unit/test_ics.py): il file `.ics` riletto con
+  `Calendar.from_ical`, compresi l'ora legale e i caratteri da proteggere.
 
 ## Trappole incontrate
 
@@ -244,6 +295,17 @@ server: un test lo verifica, e fallisce se si toglie la correzione.
 **Correzione:** `err.errors(include_url=False, include_context=False)`. Il messaggio resta
 completo, perché è già nel campo `msg`.
 
+### 405 aprendo `/plans` nel browser
+
+**Sintomo:** aprendo `http://127.0.0.1:8000/plans` nella barra degli indirizzi si ottiene
+`{"detail":"Method Not Allowed"}`, codice 405.
+**Causa:** la barra degli indirizzi fa sempre una **GET**, e `/plans` accetta solo **POST**.
+Non è un 404: l'indirizzo esiste, ma con un altro metodo (la risposta lo dice
+nell'intestazione `Allow: POST`). In più, una POST porta un corpo JSON che la barra degli
+indirizzi non sa mandare.
+**Correzione:** le POST si mandano da `/docs`, da `Invoke-RestMethod -Method Post` o da un
+programma. Dal browser si aprono solo le GET: `/health`, `/docs` e il download del `.ics`.
+
 ### Accenti rotti in Windows PowerShell
 
 **Sintomo:** chiamando l'API con `Invoke-RestMethod` in Windows PowerShell 5.1, le risposte
@@ -263,9 +325,9 @@ gli accenti si vedono bene.
 ## Prova tu
 
 1. **Il server e `/docs`.** Avvia uvicorn con Ollama acceso e apri
-   `http://127.0.0.1:8000/docs`. *Verifica:* ci sono tre endpoint (`GET /health`,
-   `POST /plans`, `POST /plans/{thread_id}/resume`) e, sotto, i modelli `PlanRequest`,
-   `PlanQuestion`, `ResumeRequest`, `PlanResult`.
+   `http://127.0.0.1:8000/docs`. *Verifica:* ci sono quattro endpoint (`GET /health`,
+   `POST /plans`, `POST /plans/{thread_id}/resume`, `GET /days/{day_date}/plan.ics`) e,
+   sotto, i modelli `PlanRequest`, `PlanQuestion`, `ResumeRequest`, `PlanResult`.
 2. **Una pianificazione completa dal browser.** In `/docs`, `POST /plans` → *Try it out* con
    `{"text": "domani dentista alle 15, poi se riesco palestra", "day_date": "2026-11-03"}` →
    *Execute*. Copia il `thread_id`, poi rispondi con `POST /plans/{thread_id}/resume`
@@ -287,7 +349,13 @@ gli accenti si vedono bene.
 
    *Verifica:* `confirm_tasks` e la tabella dei task. È lo stesso JSON di `/docs`, letto da
    un altro client: l'API non sa chi la sta usando.
-6. **I test che possono fallire.** In [app.py](../../src/planner/api/app.py) togli il
+6. **Nel calendario.** Apri nel browser `http://127.0.0.1:8000/days/AAAA-MM-GG/plan.ics` con
+   una data che hai salvato (la trovi nello 📅 Storico di Streamlit) e importa il file nel tuo
+   calendario (in Google Calendar: *Impostazioni → Importa ed esporta*). *Verifica:* gli
+   eventi sono all'ora giusta e hanno la tua frase nella descrizione. Poi importa lo stesso
+   file una seconda volta e guarda come si comporta la tua app con gli `UID` già visti:
+   aggiorna o duplica?
+7. **I test che possono fallire.** In [app.py](../../src/planner/api/app.py) togli il
    controllo `if not snapshot.next:` (con la sua riga `raise`) ed esegui
    `python -m pytest tests/unit/test_api.py`. *Verifica:* fallisce solo
    `test_answer_after_the_end_is_a_conflict`. Rimetti il controllo.

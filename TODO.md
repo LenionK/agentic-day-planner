@@ -43,7 +43,9 @@
 - [ ] API FastAPI ed export `.ics`
   - [x] app con lifespan (grafo creato una volta, o passato dai test), `GET /health` (il DB ha risposto all'avvio?)
   - [x] `POST /plans` (frase + data → `thread_id` e prima domanda) e `POST /plans/{thread_id}/resume` (risposta → domanda successiva o piano finito); 422 per risposte non valide (il grafo resta in pausa), `{}` rifiutato prima del grafo, 404 thread inesistente, 409 piano già concluso
-  - [ ] export `.ics` della giornata salvata
+  - [x] export `.ics` della giornata salvata (`export/ics.py`, `GET /days/{data}/plan.ics`): un evento per task del piano, `UID` stabile (data + id), orari con fuso (`TIMEZONE` in `.env`), frase dell'utente nella descrizione; 404 senza piano, 503 senza database
+  - [ ] descrizione degli eventi: oggi è la frase originale, che può contraddire un orario corretto a mano ("colazione alle 9" messa alle 8); segnalare quando l'orario è stato cambiato
+  - [ ] pagina web servita dall'API (HTML + JavaScript con `fetch`) per provarla come un utente: frase, domande del grafo con bottoni, piano finale e link al `.ics`
   - [ ] checkpointer su PostgreSQL: oggi i piani in pausa vivono in memoria e si perdono al riavvio del server
   - [ ] il DB si controlla solo all'avvio: riprovare come fa Streamlit, o dirlo in `/health`
 - [ ] Eval dei modelli (Qwen2.5 7B, Phi-4 mini, Llama 3.1 8B, Aya Expanse 8B) sulla GTX 1060
