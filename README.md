@@ -40,6 +40,20 @@ multi-agent system.
 ## How it works
 
 ```mermaid
+flowchart LR
+    P["Parse<br/>LLM"] --> C{{"Confirm<br/>tasks"}} --> S["Schedule<br/>CP-SAT"] --> K["Critic<br/>LLM"] --> V["Save<br/>PostgreSQL"] --> M["Remember<br/>pgvector"]
+    S -. "left out or clash" .-> C
+```
+
+Hexagons are the points where the graph stops and asks the user (`interrupt`): the tasks are
+confirmed before scheduling, and the plan comes back to the user only if some task is left out
+or required tasks clash. The critic may propose activities, and new preferences are confirmed
+before they are remembered.
+
+<details>
+<summary><strong>The full graph and every step</strong></summary>
+
+```mermaid
 flowchart TD
     START([start]) --> P["Parser: LLM + Pydantic"]
     P --> D["Check saved day: merge its tasks, pinned"]
@@ -79,6 +93,8 @@ flowchart TD
 | **Extract preferences** | Only for a saved day. The LLM writes the source, then the cue that makes it a preference (not a commitment), then the text; Python drops the ones not grounded in the sentence. Each one is compared by vector with the saved ones, and an LLM judge decides whether a close one says the same thing | Yes |
 | **Confirm preferences** | Pauses only for new preferences: the user picks which to keep and can delete close saved ones | No |
 | **Store preferences** | Saves the kept ones with their vector, counts the known ones again, deletes the chosen ones | No |
+
+</details>
 
 ### Design choices
 
