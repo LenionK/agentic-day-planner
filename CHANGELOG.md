@@ -4,6 +4,42 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-10-20
+
+The planner now remembers: plans are saved day by day, preferences are learned from the user's
+sentences, and the same flow is available as a REST API with its own web page.
+
+### Added
+
+- **Day critic**: free time computed in Python (busy minutes, longest free slot), an LLM review
+  of the day and, when it looks too empty, up to three suggested activities.
+- **Conflicts and review**: required tasks that cannot all fit go back to the user with only the
+  conflicting tasks; the plan review is asked only when some task is left out.
+- **PostgreSQL storage** with Alembic migrations (plain SQL revisions): `days` and `tasks` with
+  a cascading foreign key, only the scheduled tasks saved, `day_summary` view, history of saved
+  days, `purge_old_days` procedure that deletes days older than two weeks at startup.
+- **Saved days**: a new sentence for a date that already has a plan is merged into it (saved
+  tasks stay where they are) or replaces it, as the user chooses.
+- **Memory of preferences** with pgvector and `nomic-embed-text` embeddings: preferences
+  extracted from the sentence (source → cue → text), duplicates judged by the LLM among the
+  closest vectors, confirmed by the user before saving; the three closest are recalled for the
+  critic, which also receives the weekday. Evaluation scripts on development and held-out sets.
+- **REST API** with FastAPI: `POST /plans` and `POST /plans/{thread_id}/resume` drive the graph
+  one question at a time (422 for invalid answers, 404 unknown plan, 409 finished plan);
+  `GET /days`, `GET /preferences`, `DELETE /preferences/{id}`, `GET /health`.
+- **Calendar export**: `GET /days/{date}/plan.ics`, one event per planned task, stable UIDs,
+  times in the `TIMEZONE` of the settings.
+- **Web page** served by the API: the screens of the Streamlit app, history and preferences
+  windows, download link for the calendar, dark theme.
+- Streamlit: date picker, "Già in agenda" in the confirmation, 📅 Storico and 🧠 Preferenze
+  windows, messages about the memory of preferences.
+- `docs/`: a booklet in Italian on the technologies used (Pydantic, Ollama, FastAPI so far).
+
+### Fixed
+
+- Times edited in the Streamlit table are read as ISO strings (`17:00:00.000`).
+- The Streamlit app tries the database again instead of remembering that it was down.
+
 ## [0.2.0] - 2026-10-17
 
 First tagged release: the planner works end to end, from a sentence to an accepted plan.
@@ -27,4 +63,5 @@ First tagged release: the planner works end to end, from a sentence to an accept
 - Checkpoints in strict msgpack mode in tests.
 - README with installation and usage.
 
+[0.3.0]: https://github.com/LenionK/agentic-day-planner/releases/tag/v0.3.0
 [0.2.0]: https://github.com/LenionK/agentic-day-planner/releases/tag/v0.2.0
