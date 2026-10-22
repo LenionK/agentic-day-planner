@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from planner.dates import long_italian_date
 from planner.llm.base import LLMClient
+from planner.messages import Language, say
 from planner.solver.models import DayConfig, Interval, Schedule, fmt_time
 
 # buchi più corti non servono a proporre attività
@@ -92,6 +93,16 @@ niente altro studio se la giornata è già piena di studio.
 Usa gli intervalli liberi così come sono, senza ricalcolarli."""
 
 
+# in fondo al prompt, se l'utente usa un'altra lingua: il commento e le proposte
+# cambiano lingua; le preferenze applicate no (si copiano come le ha ricevute), né le
+# categorie, che sono valori fissi dello schema. In italiano il prompt resta quello di sempre
+ANSWER_LANGUAGE: dict[Language, str] = {
+    "it": "",
+    "en": "\n\nScrivi in inglese assessment e, per ogni suggestion, title e reason. "
+    "applied_preferences e category restano come indicato sopra, in italiano.",
+}
+
+
 def duration_text(minutes: int) -> str:
     """150 -> '2 h 30 min'"""
     hours, mins = divmod(minutes, 60)
@@ -123,6 +134,7 @@ def critic_messages(
     day: DayConfig,
     preferences: Sequence[str] = (),
     day_date: date | None = None,
+    language: Language = "it",
 ) -> list[dict]:
     """The prompt for the critic: the plan and the facts about free time, computed in Python.
 
@@ -159,13 +171,13 @@ def critic_messages(
         lines += [f"- {text}" for text in preferences]
 
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPT + ANSWER_LANGUAGE[language]},
         {"role": "user", "content": "\n".join(lines)},
     ]
 
 
 def check_suggestions(
-    review: CriticReview, slots: list[Interval]
+    review: CriticReview, slots: list[Interval], language: Language = "it"
 ) -> tuple[list[Suggestion], list[str]]:
     """Keep only the suggestions that fit in a real free slot, with a warning for each other one.
 
@@ -181,8 +193,12 @@ def check_suggestions(
             valid.append(suggestion)
         else:
             warnings.append(
-                f"Proposta scartata: {suggestion.title} ({suggestion.duration_min} min) "
-                "non entra in nessun intervallo libero"
+                say(
+                    "suggestion_does_not_fit",
+                    language,
+                    title=suggestion.title,
+                    minutes=suggestion.duration_min,
+                )
             )
     return valid, warnings
 
@@ -193,6 +209,7 @@ def critique(
     client: LLMClient,
     preferences: Sequence[str] = (),
     day_date: date | None = None,
+    language: Language = "it",
 ) -> dict:
     """Ask the critic about the plan; returns plain JSON data for the state and the interface.
 
@@ -200,8 +217,9 @@ def critique(
     would be shown to the user as if it came from the memory.
     """
     slots = free_slots(plan, day)
-    review = client.generate(critic_messages(plan, slots, day, preferences, day_date), CriticReview)
-    suggestions, warnings = check_suggestions(review, slots)
+    messages = critic_messages(plan, slots, day, preferences, day_date, language)
+    review = client.generate(messages, CriticReview)
+    suggestions, warnings = check_suggestions(review, slots, language)
     given = {text.strip().lower(): text for text in preferences}
     applied = [
         given[t.strip().lower()] for t in review.applied_preferences if t.strip().lower() in given

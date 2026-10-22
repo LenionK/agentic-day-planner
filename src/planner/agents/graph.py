@@ -1,3 +1,4 @@
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
@@ -24,6 +25,7 @@ from planner.agents.state import PlannerState
 from planner.db.repository import DayAlreadySaved, PlanRepository, PreferenceRepository
 from planner.llm.base import LLMClient
 from planner.llm.embedder import Embedder
+from planner.messages import Language, say
 from planner.solver.cpsat_scheduler import schedule
 
 # etichette delle funzioni di instradamento, collegate ai nodi nelle mappe degli archi
@@ -36,6 +38,16 @@ SUGGEST = "suggest"
 REMEMBER = "remember"
 CONFIRM = "confirm"
 STORE = "store"
+
+
+def language_of(config: RunnableConfig) -> Language:
+    """The language of the messages for the user, Italian by default.
+
+    It comes with each run ({"configurable": {"thread_id": ..., "language": "en"}}), not from
+    the state: the caller can change it between one answer and the next, and the messages
+    written from then on follow it.
+    """
+    return config.get("configurable", {}).get("language", "it")
 
 
 def all_warnings(state: PlannerState) -> list[str]:
@@ -113,8 +125,8 @@ def build_graph(
     -> confirm_preferences (interrupt, only for new ones) -> store_preferences -> END.
     """
 
-    def parser_node(state: PlannerState) -> dict:
-        result = parse_day(state["user_input"], client)
+    def parser_node(state: PlannerState, config: RunnableConfig) -> dict:
+        result = parse_day(state["user_input"], client, language_of(config))
         return {
             "tasks": result.tasks,
             "rejected": result.rejected,
@@ -147,7 +159,7 @@ def build_graph(
         # nello stato solo dati semplici, e solo i campi scritti dall'utente
         return {"user_response": answer.model_dump(exclude_unset=True)}
 
-    def editor_node(state: PlannerState) -> dict:
+    def editor_node(state: PlannerState, config: RunnableConfig) -> dict:
         response = ApprovalResponse.model_validate(state["user_response"])
         saved = state.get("saved_day")
         locked = set(saved["task_ids"]) if saved else set()
@@ -162,12 +174,14 @@ def build_graph(
             update["sources"] = sources
 
         warnings = [
-            f"{task_id}: task già in agenda, non modificabile"
+            say("edit_saved_task", language_of(config), task_id=task_id)
             for task_id in response.edits
             if task_id in locked
         ]
         allowed = {key: edit for key, edit in response.edits.items() if key not in locked}
-        tasks, edit_warnings = apply_edits(tasks, ApprovalResponse(edits=allowed))
+        tasks, edit_warnings = apply_edits(
+            tasks, ApprovalResponse(edits=allowed), language_of(config)
+        )
         return {"tasks": tasks, "edit_warnings": warnings + edit_warnings} | update
 
     def scheduler_node(state: PlannerState) -> dict:
@@ -188,7 +202,7 @@ def build_graph(
         answer = interrupt(summary, response_schema=PlanReviewResponse)
         return {"plan_accepted": answer.accept}
 
-    def critic_node(state: PlannerState) -> dict:
+    def critic_node(state: PlannerState, config: RunnableConfig) -> dict:
         # la chiamata all'LLM sta in un nodo senza interrupt: alla ripresa un nodo riparte
         # dall'inizio, e con l'interrupt qui rifarebbe la chiamata (lenta, e forse diversa)
         # con la memoria: le preferenze più vicine ai task, il Critico sceglie quelle che valgono
@@ -197,7 +211,9 @@ def build_graph(
             recalled = recall_preferences(list(state["sources"].values()), embedder, preferences)
         # la data scelta nel calendario: il Critico riceve il giorno della settimana
         day_date = state.get("day_date")
-        review = critique(state["schedule"], state["day"], client, recalled, day_date)
+        review = critique(
+            state["schedule"], state["day"], client, recalled, day_date, language_of(config)
+        )
         return {"critique": review}
 
     def suggest_activities(state: PlannerState) -> dict:
@@ -213,11 +229,12 @@ def build_graph(
         # TODO passo 3: le proposte accettate diventano task e tornano allo scheduler
         return {}
 
-    def save_plan(state: PlannerState) -> dict:
+    def save_plan(state: PlannerState, config: RunnableConfig) -> dict:
         # l'unico nodo che scrive fuori dal grafo; nessun interrupt, quindi alla ripresa
         # di un'altra domanda non viene rieseguito e non salva due volte
+        language = language_of(config)
         if "day_date" not in state:
-            return {"save_result": {"saved": False, "message": "Piano non salvato: manca la data."}}
+            return {"save_result": {"saved": False, "message": say("save_no_date", language)}}
         saved = state.get("saved_day")
         replace = saved is not None  # unita o sostituita, la giornata salvata viene riscritta
         merged = saved is not None and not saved["replaced"]
@@ -241,16 +258,16 @@ def build_graph(
                 replace=replace,
             )
         except DayAlreadySaved:
-            message = "Piano non salvato: nel frattempo la data è stata salvata altrove."
+            message = say("save_conflict", language)
             return {"save_result": {"saved": False, "message": message}}
         if merged:
-            message = "Piano unito a quello già salvato."
+            message = say("save_merged", language)
         elif replace:
-            message = "Piano salvato al posto di quello precedente."
+            message = say("save_replaced", language)
         else:
-            message = "Piano salvato."
+            message = say("save_new", language)
         if left_out:  # mai in silenzio: l'utente sa cosa non è stato salvato
-            message += f" Non salvati perché fuori dal piano: {', '.join(left_out)}."
+            message += say("save_left_out", language, titles=", ".join(left_out))
         return {"save_result": {"saved": True, "day_id": day_id, "message": message}}
 
     def extract_preferences(state: PlannerState) -> dict:
@@ -270,10 +287,12 @@ def build_graph(
         )
         return {"preference_answer": answer.model_dump()}
 
-    def store_preferences_node(state: PlannerState) -> dict:
+    def store_preferences_node(state: PlannerState, config: RunnableConfig) -> dict:
         # solo duplicati: nessuna domanda, nessuna preferenza nuova da tenere
         answer = PreferencesResponse.model_validate(state.get("preference_answer", {"keep": []}))
-        result = store_preferences(state["preference_candidates"], answer, embedder, preferences)
+        result = store_preferences(
+            state["preference_candidates"], answer, embedder, preferences, language_of(config)
+        )
         return {"preference_result": result}
 
     remember = repository is not None and embedder is not None and preferences is not None

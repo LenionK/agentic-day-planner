@@ -1,6 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from planner.agents.parser import to_minutes
+from planner.messages import Language, say
 from planner.solver.models import Task
 
 TIME_FIELDS = ("fixed_start", "earliest_start", "deadline")
@@ -58,7 +59,9 @@ def _to_task_fields(changes: dict) -> dict:
     return fields
 
 
-def apply_edits(tasks: list[Task], response: ApprovalResponse) -> tuple[list[Task], list[str]]:
+def apply_edits(
+    tasks: list[Task], response: ApprovalResponse, language: Language = "it"
+) -> tuple[list[Task], list[str]]:
     """Apply the corrections and return the new tasks plus one warning per skipped edit.
 
     The input tasks are not modified and keep their order; tasks without edits are returned as is.
@@ -72,7 +75,7 @@ def apply_edits(tasks: list[Task], response: ApprovalResponse) -> tuple[list[Tas
     warnings = []
     for task_id in response.edits:
         if task_id not in known_ids:
-            warnings.append(f"{task_id}: correzione ignorata (task inesistente)")
+            warnings.append(say("edit_unknown_task", language, task_id=task_id))
 
     edited = []
     for task in tasks:
@@ -89,7 +92,7 @@ def apply_edits(tasks: list[Task], response: ApprovalResponse) -> tuple[list[Tas
             # model_validate, non model_copy: i validator di Task devono girare
             edited.append(Task.model_validate(data))
         except ValidationError as err:
-            warnings.append(f"{task.id}: correzione ignorata ({_short_error(err)})")
+            warnings.append(say("edit_invalid", language, task_id=task.id, error=_short_error(err)))
             edited.append(task)
 
     return edited, warnings

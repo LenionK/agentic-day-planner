@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from planner.db.repository import PreferenceRepository
 from planner.llm.base import LLMClient
 from planner.llm.embedder import Embedder
+from planner.messages import Language, say
 
 MAX_PREFERENCES = 5
 
@@ -184,6 +185,7 @@ def store_preferences(
     response: PreferencesResponse,
     embedder: Embedder,
     repository: PreferenceRepository,
+    language: Language = "it",
 ) -> dict:
     """Remember what the user confirmed: duplicates seen again, new ones saved, old ones deleted.
 
@@ -205,14 +207,10 @@ def store_preferences(
     shown = {s["id"] for c in candidates for s in c["similar"]}
     deleted = sum(repository.delete(pref_id) for pref_id in set(response.delete) & shown)
 
-    parts = []
-    if to_save:
-        parts.append(f"ricordate {len(to_save)}")
-    if seen_again:
-        parts.append(f"già note {seen_again}")
-    if deleted:
-        parts.append(f"cancellate {deleted}")
-    message = f"Preferenze: {', '.join(parts)}." if parts else ""
+    counts = {"preferences_saved": len(to_save), "preferences_seen_again": seen_again}
+    counts["preferences_deleted"] = deleted
+    parts = [say(key, language, count=count) for key, count in counts.items() if count]
+    message = say("preferences_result", language, parts=", ".join(parts)) if parts else ""
     return {"saved": len(to_save), "seen_again": seen_again, "deleted": deleted, "message": message}
 
 

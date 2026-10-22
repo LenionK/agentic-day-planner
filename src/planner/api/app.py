@@ -26,9 +26,31 @@ from planner.db.preferences import SavedPreference
 from planner.db.repository import PostgresPlanRepository, PostgresPreferenceRepository
 from planner.export.ics import day_to_ics
 from planner.llm.factory import build_embedder, build_llm_client
+from planner.messages import LANGUAGES, Language, say
 from planner.solver.models import DayConfig, fmt_time
 
 STATIC = Path(__file__).parent / "static"  # la pagina web: index.html, app.js, style.css
+DEFAULT_LANGUAGE: Language = "en"  # se il client non chiede una lingua che conosciamo
+
+
+def request_language(request: Request) -> Language:
+    """The language the client asks for in Accept-Language, English if none is supported.
+
+    The header lists languages with an optional weight, the preferred first:
+    "it-IT,it;q=0.9,en;q=0.8" -> "it". Only the main part of each tag counts (it-IT -> it).
+    """
+    ranked = []
+    for position, part in enumerate(request.headers.get("accept-language", "").split(",")):
+        tag, _, weight = part.strip().partition(";")
+        try:
+            quality = float(weight.strip().removeprefix("q=")) if weight else 1.0
+        except ValueError:
+            quality = 0.0  # un peso scritto male non deve far fallire la richiesta
+        ranked.append((-quality, position, tag.strip().lower().split("-")[0]))
+    for _, _, code in sorted(ranked):
+        if code in LANGUAGES:
+            return code
+    return DEFAULT_LANGUAGE
 
 
 def database_available(url: str) -> bool:
@@ -78,10 +100,10 @@ def reply(thread_id: str, result: dict) -> PlanQuestion | PlanResult:
     )
 
 
-def available(store):
+def available(store, language: Language):
     """The repository, or 503 if the API runs without the database."""
     if store is None:
-        raise HTTPException(status_code=503, detail="Database non disponibile.")
+        raise HTTPException(status_code=503, detail=say("database_unavailable", language))
     return store
 
 
@@ -124,7 +146,8 @@ def create_app(graph=None, repository=None, preferences=None) -> FastAPI:
     @app.exception_handler(psycopg.OperationalError)
     def database_down(request: Request, exc: psycopg.OperationalError) -> JSONResponse:
         # il database si è spento dopo l'avvio: un 503 chiaro invece di un errore del server
-        return JSONResponse(status_code=503, content={"detail": "Database non raggiungibile."})
+        detail = say("database_down", request_language(request))
+        return JSONResponse(status_code=503, content={"detail": detail})
 
     @app.get("/health")
     def health() -> dict:
@@ -137,23 +160,31 @@ def create_app(graph=None, repository=None, preferences=None) -> FastAPI:
         return FileResponse(STATIC / "index.html")
 
     @app.post("/plans")
-    def start_plan(body: PlanRequest) -> PlanQuestion | PlanResult:
-        """Start planning a day: returns the first question of the graph."""
+    def start_plan(body: PlanRequest, request: Request) -> PlanQuestion | PlanResult:
+        """Start planning a day: returns the first question of the graph.
+
+        The messages of the plan (warnings, saving) are in the language of Accept-Language.
+        """
         thread_id = str(uuid.uuid4())  # una conversazione nuova per ogni frase
-        config = {"configurable": {"thread_id": thread_id}}
+        language = request_language(request)
+        config = {"configurable": {"thread_id": thread_id, "language": language}}
         start = {"user_input": body.text, "day": DayConfig(), "day_date": body.day_date}
         result = app.state.graph.invoke(start, config)
         return reply(thread_id, result)
 
     @app.post("/plans/{thread_id}/resume")
-    def resume_plan(thread_id: str, body: ResumeRequest) -> PlanQuestion | PlanResult:
+    def resume_plan(
+        thread_id: str, body: ResumeRequest, request: Request
+    ) -> PlanQuestion | PlanResult:
         """Answer the question the graph is waiting on: returns the next one, or the plan."""
-        config = {"configurable": {"thread_id": thread_id}}
+        language = request_language(request)
+        # la lingua di questa richiesta: cambiata a metà, i messaggi scritti da qui in poi la seguono
+        config = {"configurable": {"thread_id": thread_id, "language": language}}
         snapshot = app.state.graph.get_state(config)
         if not snapshot.values:
-            raise HTTPException(status_code=404, detail="Pianificazione inesistente.")
+            raise HTTPException(status_code=404, detail=say("plan_not_found", language))
         if not snapshot.next:
-            raise HTTPException(status_code=409, detail="Pianificazione già conclusa.")
+            raise HTTPException(status_code=409, detail=say("plan_finished", language))
         try:
             result = app.state.graph.invoke(Command(resume=body.answer), config)
         except ValidationError as err:
@@ -163,9 +194,9 @@ def create_app(graph=None, repository=None, preferences=None) -> FastAPI:
         return reply(thread_id, result)
 
     @app.get("/days")
-    def history() -> list[SavedDayView]:
+    def history(request: Request) -> list[SavedDayView]:
         """The saved days, most recent first, each with its plan."""
-        repository = available(app.state.repository)
+        repository = available(app.state.repository, request_language(request))
         plans = repository.history_plans()
         return [
             SavedDayView(
@@ -183,11 +214,12 @@ def create_app(graph=None, repository=None, preferences=None) -> FastAPI:
         ]
 
     @app.get("/days/{day_date}/plan.ics")
-    def export_day(day_date: date) -> Response:
+    def export_day(day_date: date, request: Request) -> Response:
         """The saved plan of a day as an iCalendar file, to import into a calendar app."""
-        saved = available(app.state.repository).load(day_date)
+        language = request_language(request)
+        saved = available(app.state.repository, language).load(day_date)
         if saved is None:
-            detail = f"Nessun piano salvato per il {day_date.isoformat()}."
+            detail = say("no_saved_plan", language, day=day_date.isoformat())
             raise HTTPException(status_code=404, detail=detail)
         return Response(
             content=day_to_ics(saved, app.state.timezone),
@@ -196,15 +228,16 @@ def create_app(graph=None, repository=None, preferences=None) -> FastAPI:
         )
 
     @app.get("/preferences")
-    def remembered_preferences() -> list[SavedPreference]:
+    def remembered_preferences(request: Request) -> list[SavedPreference]:
         """The remembered preferences, used by the critic for the next days."""
-        return available(app.state.preferences).all()
+        return available(app.state.preferences, request_language(request)).all()
 
     @app.delete("/preferences/{pref_id}", status_code=204)
-    def forget_preference(pref_id: int) -> None:
+    def forget_preference(pref_id: int, request: Request) -> None:
         """Delete a remembered preference that no longer holds."""
-        if not available(app.state.preferences).delete(pref_id):
-            raise HTTPException(status_code=404, detail="Preferenza inesistente.")
+        language = request_language(request)
+        if not available(app.state.preferences, language).delete(pref_id):
+            raise HTTPException(status_code=404, detail=say("preference_not_found", language))
 
     return app
 

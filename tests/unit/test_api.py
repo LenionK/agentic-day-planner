@@ -7,9 +7,10 @@ import pytest
 from fastapi.testclient import TestClient
 from icalendar import Calendar
 from langgraph.checkpoint.memory import InMemorySaver
+from starlette.requests import Request
 
 from planner.agents.graph import build_graph
-from planner.api.app import create_app
+from planner.api.app import create_app, request_language
 from tests.fakes import (
     FakeClient,
     FakeEmbedder,
@@ -238,12 +239,21 @@ def test_plan_saved_through_the_api_can_be_exported():
     ]
 
 
-def test_day_without_a_saved_plan_is_not_found():
+@pytest.mark.parametrize(
+    ("accept_language", "detail"),
+    [
+        ("it-IT,it;q=0.9", "Nessun piano salvato per il 2026-11-04."),
+        ("en-GB,en;q=0.9", "No plan saved for 2026-11-04."),
+    ],
+)
+def test_day_without_a_saved_plan_is_not_found(accept_language, detail):
     with start_api(FakeClient([]), FakePlanRepository(saved_day())) as client:
-        reply = client.get("/days/2026-11-04/plan.ics")
+        reply = client.get(
+            "/days/2026-11-04/plan.ics", headers={"Accept-Language": accept_language}
+        )
 
     assert reply.status_code == 404
-    assert reply.json()["detail"] == "Nessun piano salvato per il 2026-11-04."
+    assert reply.json()["detail"] == detail
 
 
 def test_export_without_database_is_unavailable():
@@ -372,7 +382,71 @@ class DownRepository(FakePlanRepository):
 
 def test_database_going_down_after_startup_is_a_clear_503():
     with start_api(FakeClient([]), DownRepository()) as client:
-        reply = client.get("/days")
+        english = client.get("/days")
+        italian = client.get("/days", headers={"Accept-Language": "it"})
 
-    assert reply.status_code == 503
-    assert reply.json() == {"detail": "Database non raggiungibile."}
+    assert english.status_code == 503
+    assert english.json() == {"detail": "The database does not answer."}
+    assert italian.json() == {"detail": "Database non raggiungibile."}
+
+
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        (None, "en"),  # nessuna richiesta: la lingua di default dell'API
+        ("it-IT,it;q=0.9,en;q=0.8", "it"),
+        ("en-US,en;q=0.9,it;q=0.8", "en"),
+        ("fr-FR,fr;q=0.9,it;q=0.5", "it"),  # il francese non c'è: la prima lingua che conosciamo
+        ("en;q=0.2,it;q=0.8", "it"),  # conta il peso, non l'ordine
+        ("de-DE", "en"),
+        ("it;q=abc,en", "en"),  # un peso scritto male vale zero, non è un errore
+    ],
+)
+def test_the_language_comes_from_accept_language(header, expected):
+    request = Request(
+        {
+            "type": "http",
+            "headers": [] if header is None else [(b"accept-language", header.encode())],
+        }
+    )
+
+    assert request_language(request) == expected
+
+
+@pytest.mark.parametrize(
+    ("accept_language", "warning", "saved"),
+    [
+        ("it", "Studio: ignorato fixed_start 18:00 (non compare nella frase)", "Piano salvato."),
+        ("en", "Studio: fixed_start 18:00 ignored (not in the sentence)", "Plan saved."),
+    ],
+)
+def test_the_messages_of_a_plan_are_in_the_language_asked(accept_language, warning, saved):
+    # l'LLM inventa un orario che nella frase non c'è: il parser lo toglie e avvisa
+    drafted = {"source": "studio", "title": "Studio", "duration_min": 60, "fixed_start": "18:00"}
+    llm = FakeClient([json.dumps({"tasks": [drafted]}), critic_answer()])
+    headers = {"Accept-Language": accept_language}
+    with start_api(llm, FakePlanRepository()) as client:
+        question = client.post(
+            "/plans", json={"text": "studio", "day_date": "2026-11-03"}, headers=headers
+        ).json()
+        final = answer_in(client, question["thread_id"], {"edits": {}}, headers).json()
+
+    assert question["question"]["warnings"] == [warning]
+    assert final["save_result"]["message"] == saved
+
+
+def test_messages_follow_a_language_changed_in_the_middle_of_a_plan():
+    llm = FakeClient([parser_answer("Studio"), critic_answer()])
+    with start_api(llm, FakePlanRepository()) as client:
+        question = client.post(
+            "/plans",
+            json={"text": "studio", "day_date": "2026-11-03"},
+            headers={"Accept-Language": "en"},
+        ).json()
+        final = answer_in(client, question["thread_id"], {"edits": {}}, {"Accept-Language": "it"})
+
+    assert final.json()["save_result"]["message"] == "Piano salvato."
+
+
+def answer_in(client: TestClient, thread_id: str, response: dict, headers: dict):
+    return client.post(f"/plans/{thread_id}/resume", json={"answer": response}, headers=headers)

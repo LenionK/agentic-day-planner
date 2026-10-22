@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from pydantic import BaseModel, Field
 
 from planner.llm.base import LLMClient
+from planner.messages import Language, say
 from planner.solver.models import Task
 
 TIME_FIELDS = ("fixed_start", "earliest_start", "deadline")
@@ -68,7 +69,10 @@ def _same_time(a: str, b: str) -> bool:
 
 
 def clean_times(
-    draft: TaskDraft, text: str, other_sources: Sequence[str] = ()
+    draft: TaskDraft,
+    text: str,
+    other_sources: Sequence[str] = (),
+    language: Language = "it",
 ) -> tuple[TaskDraft, list[str]]:
     """Remove times the LLM made up, and explain each removal.
 
@@ -91,19 +95,21 @@ def clean_times(
             continue
         if not _hour_is_mentioned(value, text):
             times[field] = None
-            warnings.append(f"{draft.title}: ignorato {field} {value} (non compare nella frase)")
+            warnings.append(
+                say("time_not_in_sentence", language, title=draft.title, field=field, value=value)
+            )
         elif not _hour_is_mentioned(value, draft.source) and any(
             _hour_is_mentioned(value, other) for other in other_sources
         ):
             times[field] = None
             warnings.append(
-                f"{draft.title}: ignorato {field} {value} (compare solo in un altro task)"
+                say("time_in_other_task", language, title=draft.title, field=field, value=value)
             )
 
     earliest, deadline = times["earliest_start"], times["deadline"]
     if earliest is not None and deadline is not None and _same_time(earliest, deadline):
         times["earliest_start"] = None
-        warnings.append(f"{draft.title}: ignorato earliest_start {earliest} (uguale alla scadenza)")
+        warnings.append(say("start_equals_deadline", language, title=draft.title, value=earliest))
 
     return draft.model_copy(update=times), warnings
 
@@ -167,6 +173,17 @@ Task:
 - source "se riesco una corsa dopo le 20": priority 1, required false, earliest_start "20:00\""""
 
 
+# in fondo al prompt, se l'utente usa un'altra lingua: solo il titolo cambia lingua.
+# source no: è copiato dalla frase, ed è su quella copia che si controllano gli orari.
+# In italiano il prompt resta quello di sempre, quello misurato con run_eval.py
+ANSWER_LANGUAGE: dict[Language, str] = {
+    "it": "",
+    "en": "\n\nScrivi il campo title in inglese, breve: una o due parole, senza orari né "
+    "condizioni. Un task per ogni attività, come sempre. Il campo source resta copiato parola "
+    "per parola dalla frase, in italiano.",
+}
+
+
 class RejectedTask(BaseModel):
     draft: TaskDraft
     reason: str
@@ -179,14 +196,14 @@ class ParseResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-def parse_day(text: str, client: LLMClient) -> ParseResult:
+def parse_day(text: str, client: LLMClient, language: Language = "it") -> ParseResult:
     """Extract tasks from free text.
 
     Made-up times are removed with a warning; drafts that cannot become valid Tasks
     are rejected, not lost. Rejected drafts are kept as the LLM wrote them.
     """
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPT + ANSWER_LANGUAGE[language]},
         {"role": "user", "content": text},
     ]
     parsed = client.generate(messages, ParsedDay)
@@ -198,7 +215,7 @@ def parse_day(text: str, client: LLMClient) -> ParseResult:
     all_sources = [draft.source for draft in parsed.tasks]
     for index, draft in enumerate(parsed.tasks, start=1):
         other_sources = all_sources[: index - 1] + all_sources[index:]
-        cleaned, draft_warnings = clean_times(draft, text, other_sources)
+        cleaned, draft_warnings = clean_times(draft, text, other_sources, language)
         warnings.extend(draft_warnings)
         try:
             task = draft_to_task(cleaned, index)
