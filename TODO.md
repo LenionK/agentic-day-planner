@@ -22,6 +22,13 @@
 - [x] Critico della giornata (`agents/critic.py`): buchi liberi e fatti calcolati in Python; nodo `critic` con LLM (valutazione → vuota sì/no → proposte) e nodo `suggest_activities` con interrupt; proposte che non entrano in nessun buco scartate con avviso; nell'interfaccia piano, fatti come dati e commento come opinione
 
 ## Prossimi passi
+- [ ] **Prossimo: tutto in Docker con un comando** (`docker compose up` e si apre `http://localhost:8000`)
+  - [x] passo 1, meno passaggi: migrazioni automatiche all'avvio dell'API (`planner/db/migrate.py`, usata anche dai test), modelli di Ollama scaricati in sottofondo se mancano con l'avanzamento nella pagina e in `/health` (`planner/llm/ollama_models.py`), nuovi piani in attesa (503) finché i modelli non sono pronti o se Ollama non risponde, `.env` facoltativo
+  - [ ] un `Dockerfile` per l'API (installa il progetto, avvia uvicorn) e un servizio `api` in `docker-compose.yml`, che aspetta il database (`depends_on` con `healthcheck`)
+  - [ ] Ollama **del computer** come scelta di default (`OLLAMA_HOST=http://host.docker.internal:11434`): niente secondo download dei modelli (~5 GB) e la GPU già configurata
+  - [ ] un *profile* `ollama` (`docker compose --profile ollama up`) con l'immagine ufficiale di Ollama e la GPU passata al container, per chi non ha Ollama installato (su Windows: Docker Desktop con WSL2 e driver NVIDIA)
+  - [ ] per sviluppare: il codice montato nel container con `--reload`, per non ricostruire l'immagine a ogni modifica
+  - [ ] README: "Quick start" con un comando solo, e le istruzioni attuali come installazione per chi sviluppa
 - [ ] **Migliorare l'interfaccia:** oggi alcune cose non si notano (la domanda sulle preferenze arriva solo alla fine e solo se la frase ne contiene una; i messaggi della memoria sono piccoli). Da rivedere: ordine delle schermate, messaggi più chiari, indicare in che passo del flusso si è, testi delle preferenze modificabili nella conferma.
   - [x] pagina web, revisione con regole di design (euristiche di Nielsen, gerarchia visiva, vicinanza): indicatore dei passi, attesa ed errori accanto al bottone premuto, modulo chiuso in una riga durante la pianificazione con "Nuova pianificazione" che chiede prima di perdere il piano, un'azione principale per schermata (blu; rosso solo per ciò che cancella), piano come linea del tempo con il tempo libero, esito e download in cima al piano finale, dettagli in una sezione richiudibile, niente messaggi doppi, prova a 390 px
   - [x] una sola interfaccia: Streamlit rimossa (resta nel tag v0.3.0), si tiene la pagina web

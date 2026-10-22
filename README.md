@@ -152,19 +152,22 @@ cd agentic-day-planner
 
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
-
 python -m pip install -e ".[dev]"
 
-ollama pull qwen2.5:7b              # the LLM
-ollama pull nomic-embed-text        # the embedding model for the preferences
-cp .env.example .env                # Windows: copy .env.example .env
-
 docker compose up -d                # PostgreSQL + pgvector on port 5433
-python -m alembic upgrade head      # creates the tables
 ```
 
-Settings (models, Ollama host, context size, temperature, database URL...) are in `.env`; the
-defaults work with a local Ollama and the Docker database.
+That is all: with Ollama running, start the API (see [Usage](#usage)) and it does the rest.
+
+- **The tables** are created, or brought to the last revision, every time the API starts
+  (`alembic upgrade head` from Python; on an up-to-date database it changes nothing).
+- **The models** (`qwen2.5:7b` and `nomic-embed-text`) are downloaded in the background if
+  missing: the page shows the progress, and planning starts when they are ready. The first time
+  this takes a few minutes (about 5 GB). If Ollama is not running yet, the page says so and
+  notices by itself when it starts.
+- **`.env` is optional**: the defaults work with a local Ollama and the Docker database. Copy
+  `.env.example` to `.env` only to change something (models, Ollama host, context size, GPU
+  layers, database URL...).
 
 **Speed: keep the model on the GPU.** After a first plan, run `ollama ps`: the PROCESSOR column
 should say `100% GPU`. Ollama estimates the memory it needs with a wide margin and, on a 6 GB card,
@@ -290,7 +293,7 @@ the `purge_old_days` procedure.
 
 ```bash
 python -m alembic current              # revision of the database
-python -m alembic upgrade head         # apply the missing revisions
+python -m alembic upgrade head         # apply the missing revisions (the API does it at startup)
 python -m alembic upgrade head --sql   # print the SQL without running it
 python -m alembic downgrade -1         # undo the last revision
 ```
@@ -312,7 +315,7 @@ To reset:
 | delete the remembered preferences | `DELETE FROM preferences;` |
 | empty all tables | `TRUNCATE days, preferences RESTART IDENTITY CASCADE;` |
 | rebuild the schema | `python -m alembic downgrade base` then `python -m alembic upgrade head` |
-| start from scratch | `docker compose down -v`, `docker compose up -d`, `python -m alembic upgrade head` |
+| start from scratch | `docker compose down -v`, `docker compose up -d`, then restart the API (it creates the tables) |
 
 ### Tests and evaluation
 

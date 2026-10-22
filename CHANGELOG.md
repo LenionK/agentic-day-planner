@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Fewer installation steps**: the API brings the database to the last revision when it starts
+  (no more `alembic upgrade head` by hand), and downloads the missing Ollama models in the
+  background (no more `ollama pull`); `/health` and the page show the progress, and new plans
+  wait (503 with the reason) until the models are ready or while Ollama does not answer. `.env`
+  is optional.
+- A clear 503 when Ollama stops answering in the middle of a plan.
+
 ## [0.4.0] - 2026-10-22
 
 One interface instead of two: the web page served by the API, redesigned with design rules,
