@@ -11,6 +11,7 @@ from starlette.requests import Request
 
 from planner.agents.graph import build_graph
 from planner.api.app import create_app, request_language
+from planner.llm.ollama_models import ModelDownloads
 from tests.fakes import (
     FakeClient,
     FakeEmbedder,
@@ -338,8 +339,66 @@ def test_health_says_whether_there_is_a_database():
     with start_api(FakeClient([]), FakePlanRepository()) as with_db:
         saving = with_db.get("/health").json()
 
-    assert alone == {"status": "ok", "database": False, "purged": 0}
+    # con un grafo dei test non ci sono modelli di Ollama da aspettare
+    assert alone == {"status": "ok", "database": False, "purged": 0, "ollama": None, "models": {}}
     assert saving["database"] is True
+
+
+def downloading(percent: int) -> ModelDownloads:
+    downloads = ModelDownloads(["qwen2.5:7b", "nomic-embed-text"])
+    downloads.set_ollama(True)
+    downloads.set("qwen2.5:7b", "downloading", percent)
+    downloads.set("nomic-embed-text", "ready")
+    return downloads
+
+
+def test_a_new_plan_waits_while_a_model_is_downloading():
+    llm = FakeClient([parser_answer("Studio")])
+    downloads = downloading(40)
+    graph = build_graph(llm, checkpointer=InMemorySaver())
+    with TestClient(create_app(graph, models=downloads)) as client:
+        health = client.get("/health").json()
+        waiting = client.post("/plans", json={"text": "studio", "day_date": "2026-11-03"})
+        downloads.set("qwen2.5:7b", "ready")
+        ready = client.post("/plans", json={"text": "studio", "day_date": "2026-11-03"})
+
+    assert health["models"]["qwen2.5:7b"] == {"state": "downloading", "percent": 40, "error": None}
+    assert waiting.status_code == 503
+    assert waiting.json()["detail"] == (
+        "Downloading the model qwen2.5:7b (40%): try again when it is ready."
+    )
+    assert ready.status_code == 200
+    assert len(llm.calls) == 1  # solo la seconda richiesta è arrivata all'LLM
+
+
+def test_a_new_plan_says_when_ollama_does_not_answer():
+    downloads = ModelDownloads(["qwen2.5:7b"])
+    downloads.set_ollama(False)
+    graph = build_graph(FakeClient([]), checkpointer=InMemorySaver())
+    with TestClient(create_app(graph, models=downloads)) as client:
+        reply = client.post(
+            "/plans",
+            json={"text": "studio", "day_date": "2026-11-03"},
+            headers={"Accept-Language": "it"},
+        )
+
+    assert reply.status_code == 503
+    assert reply.json()["detail"] == "Ollama non risponde: è avviato?"
+
+
+class OllamaGoneClient(FakeClient):
+    """An LLM client whose Ollama stopped answering in the middle of a plan."""
+
+    def _complete(self, messages, schema):
+        raise ConnectionError("Failed to connect to Ollama")
+
+
+def test_ollama_stopping_during_a_plan_is_a_clear_503():
+    with start_api(OllamaGoneClient([])) as client:
+        reply = client.post("/plans", json={"text": "studio", "day_date": "2026-11-03"})
+
+    assert reply.status_code == 503
+    assert reply.json()["detail"] == "Ollama does not answer: is it running?"
 
 
 def test_history_lists_the_saved_days_with_their_plan():

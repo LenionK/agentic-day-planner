@@ -14,6 +14,7 @@ const state = {
   language: savedLanguage(), // la lingua della pagina e dei messaggi chiesti all'API
   last: null, // l'ultima risposta dell'API: cambiando lingua, la schermata si ridisegna
   bannerKey: null, // l'avviso in cima (senza database), da ritradurre cambiando lingua
+  health: null, // l'ultimo /health: Ollama e i modelli, finché non sono pronti
 };
 
 const form = document.querySelector("#new-plan");
@@ -80,6 +81,7 @@ function setLanguage(language) {
   }
   translateStatic();
   if (state.bannerKey) showBanner(state.bannerKey);
+  showModels();
   if (state.threadId) collapseForm();
   if (state.last) render(state.last, { scroll: false });
   document.querySelectorAll("dialog[open]").forEach((dialog) => refill(dialog));
@@ -748,6 +750,38 @@ function showToast(text) {
   setTimeout(() => (toast.hidden = true), 5000); // scompare da solo
 }
 
+// Cosa dire di Ollama e dei modelli, o null se è tutto pronto.
+function modelsNotice(health) {
+  if (!health) return null;
+  if (health.ollama === false) return ["warning", t("ollama_down")];
+  for (const [model, status] of Object.entries(health.models ?? {})) {
+    if (status.state === "error") return ["warning", t("model_error", { model, error: status.error })];
+    if (status.state === "downloading") {
+      return ["info", t("model_downloading", { model, percent: status.percent ?? 0 })];
+    }
+    if (status.state === "checking") return ["info", t("models_checking")];
+  }
+  return null;
+}
+
+function showModels() {
+  const message = modelsNotice(state.health);
+  document.querySelector("#models").replaceChildren(...(message ? [notice(...message)] : []));
+}
+
+// La prima volta i modelli si scaricano in sottofondo (minuti): finché non sono pronti, o
+// Ollama non risponde, la pagina richiede /health ogni 3 secondi e aggiorna l'avviso;
+// quando è tutto pronto l'avviso sparisce e la pagina smette di chiedere.
+function watchModels() {
+  showModels();
+  if (!modelsNotice(state.health)) return;
+  setTimeout(async () => {
+    const health = await api("GET", "/health");
+    if (health.ok) state.health = health.data;
+    watchModels();
+  }, 3000);
+}
+
 function showBanner(key) {
   state.bannerKey = key;
   document.querySelector("#banner").replaceChildren(notice("warning", t(key)));
@@ -807,6 +841,10 @@ async function start() {
 
   const health = await api("GET", "/health");
   state.database = health.ok && health.data.database;
+  if (health.ok) {
+    state.health = health.data;
+    watchModels();
+  }
   if (!health.ok) {
     showError(errorText(health.data.detail));
   } else if (!state.database) {

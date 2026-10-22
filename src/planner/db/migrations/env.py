@@ -10,9 +10,11 @@ from planner.config import Settings
 # access to the values within the .ini file in use.
 config = context.config
 
-# indirizzo del database da .env, come nel resto del progetto (non da alembic.ini).
+# indirizzo del database: quello passato da upgrade_database (API all'avvio, test), altrimenti
+# quello di .env, come nel resto del progetto (non da alembic.ini).
 # "postgresql://" per SQLAlchemy vuol dire psycopg2: il driver va cambiato in psycopg 3.
-db_url = make_url(Settings().database_url).set(drivername="postgresql+psycopg")
+url = config.attributes.get("database_url") or Settings().database_url
+db_url = make_url(url).set(drivername="postgresql+psycopg")
 config.set_main_option("sqlalchemy.url", db_url.render_as_string(hide_password=False))
 
 # Interpret the config file for Python logging.

@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
+from ollama import Client
 from pydantic import ValidationError
 
 from planner.agents.approval import approval, plan_summary
@@ -22,10 +23,12 @@ from planner.api.schemas import (
     SavedDayView,
 )
 from planner.config import Settings
+from planner.db.migrate import upgrade_database
 from planner.db.preferences import SavedPreference
 from planner.db.repository import PostgresPlanRepository, PostgresPreferenceRepository
 from planner.export.ics import day_to_ics
 from planner.llm.factory import build_embedder, build_llm_client
+from planner.llm.ollama_models import ModelDownloads, start_model_check
 from planner.messages import LANGUAGES, Language, say
 from planner.solver.models import DayConfig, fmt_time
 
@@ -107,11 +110,29 @@ def available(store, language: Language):
     return store
 
 
-def create_app(graph=None, repository=None, preferences=None) -> FastAPI:
+def models_not_ready(downloads: ModelDownloads | None, language: Language) -> str | None:
+    """Why a new plan cannot start yet (Ollama down, a model downloading), or None."""
+    if downloads is None:
+        return None  # i test passano un grafo con un LLM finto: nessun modello da aspettare
+    if downloads.snapshot()["ollama"] is False:
+        return say("ollama_down", language)
+    waiting = downloads.waiting_for()
+    if waiting is None:
+        return None
+    model, state = waiting
+    if state["state"] == "error":
+        return say("model_error", language, model=model, error=state["error"])
+    if state["state"] == "downloading":
+        return say("model_downloading", language, model=model, percent=state["percent"])
+    return say("models_checking", language)
+
+
+def create_app(graph=None, repository=None, preferences=None, models=None) -> FastAPI:
     """Create the API application.
 
-    Tests pass their own graph and repositories; otherwise they are built at startup,
-    the repositories only if the database answers.
+    Tests pass their own graph and repositories (and, to test the wait, the model
+    downloads); otherwise everything is built at startup: the database is brought to the
+    last revision, and the Ollama models are checked and downloaded in the background.
     """
 
     @asynccontextmanager
@@ -129,14 +150,21 @@ def create_app(graph=None, repository=None, preferences=None) -> FastAPI:
             app.state.graph = build_planner_graph(
                 settings, app.state.repository, app.state.preferences
             )
+            if app.state.database:
+                upgrade_database(url)  # le tabelle mancanti: niente `alembic upgrade head` a mano
             # all'avvio si cancellano le giornate più vecchie di 2 settimane
             app.state.purged = app.state.repository.purge_old_days() if app.state.database else 0
+            # i modelli mancanti si scaricano in sottofondo: l'API risponde già, e /health dice
+            # a che punto sono (il primo download di qwen2.5:7b richiede minuti)
+            app.state.models = ModelDownloads([settings.llm_model, settings.embed_model])
+            start_model_check(Client(host=settings.ollama_host), app.state.models)
         else:
             app.state.database = repository is not None
             app.state.graph = graph
             app.state.repository = repository
             app.state.preferences = preferences
             app.state.purged = 0
+            app.state.models = models
         yield  # da qui l'app serve le richieste; dopo yield, la chiusura
 
     app = FastAPI(title="Agentic Day Planner", lifespan=lifespan)
@@ -160,10 +188,26 @@ def create_app(graph=None, repository=None, preferences=None) -> FastAPI:
         detail = say("database_down", request_language(request))
         return JSONResponse(status_code=503, content={"detail": detail})
 
+    @app.exception_handler(ConnectionError)
+    def ollama_down(request: Request, exc: ConnectionError) -> JSONResponse:
+        # Ollama si è spento durante una pianificazione: un 503 chiaro, non un errore del server
+        detail = say("ollama_down", request_language(request))
+        return JSONResponse(status_code=503, content={"detail": detail})
+
     @app.get("/health")
     def health() -> dict:
-        """Whether the API is up, whether the database answered, how many old days were purged."""
-        return {"status": "ok", "database": app.state.database, "purged": app.state.purged}
+        """Whether the API is up, the database answered, old days were purged, the models are ready.
+
+        "models" tells for each Ollama model whether it is ready, downloading (with the
+        percent) or failed; "ollama" whether Ollama answers (None before the first check).
+        """
+        models = app.state.models.snapshot() if app.state.models else {"ollama": None, "models": {}}
+        return {
+            "status": "ok",
+            "database": app.state.database,
+            "purged": app.state.purged,
+            **models,
+        }
 
     @app.get("/", include_in_schema=False)
     def page() -> FileResponse:
@@ -176,8 +220,12 @@ def create_app(graph=None, repository=None, preferences=None) -> FastAPI:
 
         The messages of the plan (warnings, saving) are in the language of Accept-Language.
         """
-        thread_id = str(uuid.uuid4())  # una conversazione nuova per ogni frase
         language = request_language(request)
+        # i modelli si stanno ancora scaricando, o Ollama non risponde: lo si dice subito
+        reason = models_not_ready(app.state.models, language)
+        if reason:
+            raise HTTPException(status_code=503, detail=reason)
+        thread_id = str(uuid.uuid4())  # una conversazione nuova per ogni frase
         config = {"configurable": {"thread_id": thread_id, "language": language}}
         start = {"user_input": body.text, "day": DayConfig(), "day_date": body.day_date}
         result = app.state.graph.invoke(start, config)

@@ -5,19 +5,15 @@ import os
 # Va impostata prima che langgraph venga importato: conftest viene caricato per primo.
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
-from pathlib import Path
-
 import psycopg
 import pytest
-from alembic import command
-from alembic.config import Config
 from psycopg import sql
 from sqlalchemy.engine import make_url
 
 from planner.config import Settings
+from planner.db.migrate import upgrade_database
 
 TEST_DB = "planner_test"
-PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
 
 @pytest.fixture(scope="session")
@@ -42,11 +38,8 @@ def db_url() -> str:
     except psycopg.OperationalError:
         pytest.skip("database non raggiungibile: avvia Docker e `docker compose up -d`")
 
-    # env.py di Alembic legge DATABASE_URL da Settings: la variabile d'ambiente
-    # ha la precedenza sul file .env, quindi le migrazioni vanno sul database di test
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setenv("DATABASE_URL", test_url)
-        command.upgrade(Config(toml_file=PYPROJECT), "head")
+    # la stessa funzione che usa l'API all'avvio, sul database di test
+    upgrade_database(test_url)
     return test_url
 
 

@@ -93,6 +93,23 @@ MESSAGES: dict[str, dict[Language, str]] = {
         "en": "No plan saved for {day}.",
     },
     "preference_not_found": {"it": "Preferenza inesistente.", "en": "No such preference."},
+    # i modelli di Ollama, scaricati all'avvio se mancano
+    "ollama_down": {
+        "it": "Ollama non risponde: è avviato?",
+        "en": "Ollama does not answer: is it running?",
+    },
+    "models_checking": {
+        "it": "Sto controllando i modelli di Ollama: riprova tra un momento.",
+        "en": "Checking the Ollama models: try again in a moment.",
+    },
+    "model_downloading": {
+        "it": "Sto scaricando il modello {model} ({percent}%): riprova quando è pronto.",
+        "en": "Downloading the model {model} ({percent}%): try again when it is ready.",
+    },
+    "model_error": {
+        "it": "Il modello {model} non si scarica: {error}",
+        "en": "The model {model} cannot be downloaded: {error}",
+    },
 }
 
 
