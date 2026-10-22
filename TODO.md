@@ -34,7 +34,7 @@
   - [ ] frasi scritte in inglese: prompt in inglese e una valutazione del parser su frasi inglesi
   - [ ] libretto, capitolo 10: `Accept-Language` e il `config` di LangGraph come contesto della richiesta
 - [ ] **Rivedere quando salvare le preferenze:** oggi si estraggono solo dopo il salvataggio del piano e si confermano in una schermata a parte alla fine; valutare se chiederle insieme alla conferma dei task, se ricavarle anche dal comportamento (task spostati, orari scelti spesso) e cosa fare se l'utente abbandona la domanda.
-- [ ] **Continuare il libretto delle tecnologie (`docs/`):** fatti l'indice e i capitoli 1 (Pydantic), 2 (Ollama e LLM locali) e 10 (FastAPI). Mancano `architettura.md` e i capitoli 3–9 (LangGraph, CP-SAT, la pagina web, PostgreSQL e psycopg, Alembic, embedding e pgvector, test e valutazione). Ogni esempio va provato davvero prima di scriverlo.
+- [ ] **Continuare il libretto delle tecnologie (`docs/`):** fatti l'indice e i capitoli 1 (Pydantic), 2 (Ollama e LLM locali), 3 (LangChain e LangGraph) e 10 (FastAPI). Mancano `architettura.md` e i capitoli 4–9 (CP-SAT, la pagina web, PostgreSQL e psycopg, Alembic, embedding e pgvector, test e valutazione). Ogni esempio va provato davvero prima di scriverlo.
 - [ ] Database (PostgreSQL)
   - [x] schema con Alembic: `days` (una per data) e `tasks` (chiave esterna con `ON DELETE CASCADE`)
   - [x] `store.py` (salva, rilegge, sostituisce in una transazione) e test di integrazione su `planner_test`

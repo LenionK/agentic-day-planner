@@ -37,7 +37,7 @@ Ogni capitolo si legge anche da solo, ma i rimandi presuppongono questo ordine.
 |---|---|---|---|
 | 1 | [Pydantic](libretto/01-pydantic.md) | 2.14.1 | Modelli di dati validati, errori leggibili, schemi JSON da dare a un LLM |
 | 2 | [Ollama e LLM locali](libretto/02-ollama-llm.md) | libreria 0.6.3, modello `qwen2.5:7b` | Far girare un modello sul proprio PC, output strutturato, scrivere prompt |
-| 3 | [LangGraph](libretto/03-langgraph.md) | 1.2.14 | Stato, nodi, archi condizionali, cicli, pause per l'utente (`interrupt`), checkpointer |
+| 3 | [LangChain e LangGraph](libretto/03-langgraph.md) | langgraph 1.2.14, langchain-core 1.6.10, langchain-ollama 1.1.0 | Runnable e catene; stato, nodi, archi condizionali, cicli, pause per l'utente (`interrupt`), checkpointer, config di un'esecuzione |
 | 4 | [OR-Tools CP-SAT](libretto/04-ortools-cpsat.md) | 9.15 | Descrivere un problema di orari come vincoli e lasciare al solver la soluzione ottima |
 | 5 | [La pagina web](libretto/05-pagina-web.md) | HTML, CSS, JavaScript (nessuna libreria) | Costruire la pagina con il DOM, `fetch`, schermate guidate dallo stato, regole di design, tema scuro |
 | 6 | [PostgreSQL e psycopg](libretto/06-postgresql-psycopg.md) | PostgreSQL 16, psycopg 3.3.6 | Chiavi esterne, vincoli, view, procedure, query parametrizzate, transazioni |
