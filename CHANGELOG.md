@@ -4,7 +4,10 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] - 2026-10-22
+
+One interface instead of two: the web page served by the API, redesigned with design rules,
+in English or Italian, with a settings panel. The model runs twice as fast on a 6 GB card.
 
 ### Added
 
@@ -16,13 +19,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
   in the chosen language (a line at the end of the prompts; Italian prompts unchanged); sentences
   are still read in Italian, and preferences stay Italian.
 - **⚙️ Settings** panel: language, theme (System / Light / Dark) and the remembered preferences.
-- README: contents, screenshots of the web page (dark theme, English).
+- README: contents, screenshots of the web page (dark theme, English; the settings in Italian).
 
 ### Changed
 
-- **Web page redesigned** following design rules: steps indicator (Task → Piano → Critico →
-  Preferenze → Fine), wait and errors next to the clicked button, the form collapses into one
-  line during a plan ("Nuova pianificazione" asks before discarding it), one primary action per
+- **Web page redesigned** following design rules: steps indicator (Tasks → Plan → Critic →
+  Preferences → Done), wait and errors next to the clicked button, the form collapses into one
+  line during a plan ("New plan" asks before discarding it), one primary action per
   screen (blue; red only for what deletes), the plan as a timeline with the free time, outcome
   and calendar download first on the final screen, works at phone width.
 - **Faster LLM calls**: new settings `LLM_NUM_GPU` (GPU layers; `99` puts all of qwen2.5:7b on a
@@ -38,7 +41,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- The 📅 Storico and 🧠 Preferenze buttons stayed visible without the database.
+- The history and preferences buttons stayed visible without the database.
 
 ## [0.3.0] - 2026-10-20
 
@@ -99,5 +102,6 @@ First tagged release: the planner works end to end, from a sentence to an accept
 - Checkpoints in strict msgpack mode in tests.
 - README with installation and usage.
 
+[0.4.0]: https://github.com/LenionK/agentic-day-planner/releases/tag/v0.4.0
 [0.3.0]: https://github.com/LenionK/agentic-day-planner/releases/tag/v0.3.0
 [0.2.0]: https://github.com/LenionK/agentic-day-planner/releases/tag/v0.2.0
