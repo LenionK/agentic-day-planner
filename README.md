@@ -7,6 +7,21 @@ LangGraph + Ollama + OR-Tools CP-SAT + PostgreSQL/pgvector, 100% free stack.
 Want to study these technologies? The [booklet in `docs/`](docs/README.md) (in Italian) explains each
 one through this project's code, including the mistakes made along the way.
 
+<p align="center">
+  <img src="docs/images/final-plan.png" width="720"
+       alt="The final screen: plan saved, download for the calendar, the day as a timeline with the free time, the critic's numbers and comment">
+</p>
+
+## Contents
+
+- [What it does](#what-it-does)
+- [How it works](#how-it-works) · [Design choices](#design-choices)
+- [Installation](#installation)
+- [Usage](#usage) · [API](#api) · [Database](#database) · [Tests and evaluation](#tests-and-evaluation)
+- [Project structure](#project-structure)
+- [Status and roadmap](#status-and-roadmap)
+- [License](#license)
+
 ## What it does
 
 You pick a day and write something like *"devo studiare 2 ore, la mattina mi concentro meglio,
@@ -177,29 +192,70 @@ python -m uvicorn planner.api.app:app --reload
 
 Open <http://127.0.0.1:8000/>:
 
-1. Pick the day (tomorrow by default), write what you have to do and press **Enter**. The form
-   closes into one line with the day and the sentence; the steps at the top (Task → Piano →
-   Critico → Preferenze → Fine) show where you are.
-2. Check the tasks, edit the table if needed, and press *Conferma e pianifica*. If the day already
+1. Pick the day (tomorrow by default), write what you have to do **in Italian** and press
+   **Enter**. The form closes into one line with the day and the sentence; the steps at the top
+   (Tasks → Plan → Critic → Preferences → Done) show where you are.
+2. Check the tasks, edit the table if needed, and press *Confirm and plan*. If the day already
    has a plan, its tasks are shown apart: the new ones are added in the free time, or press
-   *Sostituisci il piano salvato* to replace it.
+   *Replace the saved plan* to replace it.
 3. If some tasks don't fit, accept the plan or go back to the tasks.
 4. Read the critic's comment, the preferences it considered and, if the day looks empty, its
    suggestions.
 5. If the sentence expressed a preference, confirm which ones to remember.
-6. The final screen starts with the outcome and **📥 Scarica nel calendario** (an `.ics` file for
+6. The final screen starts with the outcome and **📥 Download for your calendar** (an `.ics` file for
    Outlook, Google Calendar or the phone), then the plan as a timeline and the critic.
 
-The buttons next to the title open **📅 Storico** (the saved days with their plans) and
-**🧠 Preferenze** (the remembered preferences, each one can be deleted); 🌙/☀️ switches the dark
-theme, which otherwise follows the system. *Nuova pianificazione* starts again, and asks first if
-a plan is in progress. Days older than two weeks are deleted when the API starts; preferences
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/confirm-tasks.png"
+      alt="Task confirmation: the tasks read from the sentence in an editable table"></td>
+    <td width="50%"><img src="docs/images/critic.png"
+      alt="The critic: busy time, longest free slot, comment, preferences considered and suggestions"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Check the tasks before anything is scheduled</em></td>
+    <td align="center"><em>The critic: numbers from Python, the comment from the LLM</em></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/history.png"
+      alt="History: the saved days, each with its plan as a timeline and a link to the .ics file"></td>
+    <td><img src="docs/images/preferences.png"
+      alt="Preference confirmation: a preference found in the sentence, with the words it comes from"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>📅 History: the saved days</em></td>
+    <td align="center"><em>Confirm what is remembered</em></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><img src="docs/images/settings.png" width="50%"
+      alt="Settings with Italian selected: language, theme and the remembered preferences, each with a Delete button"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><em>⚙️ Settings, here with Italian selected: the whole page follows the language</em></td>
+  </tr>
+</table>
+
+The screenshots come from the real page, driven by a script with scripted LLM answers.
+
+Next to the title, **📅 History** shows the saved days with their plans, and **⚙️ Settings** holds
+the language, the theme (*System*, *Light* or *Dark*; *System* follows the operating system) and
+the remembered preferences, each of which can be deleted. *New plan* starts again, and asks first
+if a plan is in progress. Days older than two weeks are deleted when the API starts; preferences
 are kept.
 
 Without the database the planner still works, but plans and preferences are not saved (a warning
 says so); start Docker and restart the API to use it. With the model all on the GPU of a GTX 1060
-6GB, each LLM call takes about 3–10 seconds; the solver and the embeddings are fast. The interface
-is in Italian, like the prompts. A Streamlit interface was available up to v0.3.0.
+6GB, each LLM call takes about 3–10 seconds; the solver and the embeddings are fast. A Streamlit
+interface was available up to v0.3.0.
+
+**Languages.** The interface is in English or Italian, chosen in ⚙️ Settings (each language by
+its own name, no flags: a flag stands for a country, not a language). English is the default and
+the choice is remembered. The page asks the API for its messages in the same language with the
+`Accept-Language` header, so warnings, saving and errors follow it, also after a switch in the
+middle of a plan. The model writes task titles and the critic's comment in that language too: a
+line at the end of the prompts names those fields, while the copied source stays Italian (the
+checks on made-up times read it) and so do the remembered preferences (one language keeps the
+vector search reliable). Sentences are still written in Italian, as the English page says.
 
 ### API
 
@@ -283,6 +339,7 @@ src/planner/
   db/       store and preferences (SQL), repository (what the graph uses), Alembic migrations
   api/      FastAPI app (endpoints), request/response models, static/ web page (HTML, JS, CSS)
   export/   a saved day as an iCalendar (.ics) file
+  messages.py  every sentence written for the user, in Italian and English
   dates.py  dates in Italian
   config.py settings from .env
 tests/

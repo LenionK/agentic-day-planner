@@ -6,6 +6,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **English and Italian**: the language is chosen in the settings (English by default,
+  remembered); every request sends `Accept-Language`, and the API writes its messages (warnings,
+  saving, preferences, errors) in that language, also after a switch in the middle of a plan.
+  All the sentences for the user are in `planner/messages.py` and `static/i18n.js`, with tests
+  that every key exists in both languages. The model writes task titles and the critic's comment
+  in the chosen language (a line at the end of the prompts; Italian prompts unchanged); sentences
+  are still read in Italian, and preferences stay Italian.
+- **⚙️ Settings** panel: language, theme (System / Light / Dark) and the remembered preferences.
+- README: contents, screenshots of the web page (dark theme, English).
+
 ### Changed
 
 - **Web page redesigned** following design rules: steps indicator (Task → Piano → Critico →

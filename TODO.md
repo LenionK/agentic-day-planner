@@ -27,6 +27,12 @@
   - [x] una sola interfaccia: Streamlit rimossa (resta nel tag v0.3.0), si tiene la pagina web
   - [ ] la tabella dei task su telefono scorre di lato: valutare una scheda per task
   - [ ] testi delle preferenze modificabili nella conferma; chiedere le preferenze prima (tocca il grafo, vedi sotto)
+  - [x] interfaccia in inglese e italiano: selettore "English | Italiano" (nome della lingua, niente bandiere), inglese di default e scelta ricordata; testi della pagina in `static/i18n.js`, messaggi dell'API in `planner/messages.py`, lingua chiesta con `Accept-Language` e passata al grafo nel `config` della richiesta (non nello stato: scriverla a ogni risposta faceva fallire il ritentativo dopo una risposta rifiutata)
+  - [x] pannello ⚙️ Impostazioni: lingua, tema (Sistema / Chiaro / Scuro), preferenze ricordate con Elimina; in alto solo 📅 Storico e ⚙️
+  - [x] il modello scrive nella lingua scelta titoli dei task, commento e proposte del Critico: una riga in fondo ai prompt (vuota in italiano, quindi prompt italiani invariati) che nomina i campi; `source`, preferenze e categorie restano in italiano. Prova a campione su 3 frasi: stessi task e orari dell'italiano (una prima versione con un esempio univa due task)
+  - [ ] misurare la modalità inglese: `run_eval.py` riconosce i task dalle parole italiane del titolo, va esteso (per esempio confrontando il `source` invece del titolo)
+  - [ ] frasi scritte in inglese: prompt in inglese e una valutazione del parser su frasi inglesi
+  - [ ] libretto, capitolo 10: `Accept-Language` e il `config` di LangGraph come contesto della richiesta
 - [ ] **Rivedere quando salvare le preferenze:** oggi si estraggono solo dopo il salvataggio del piano e si confermano in una schermata a parte alla fine; valutare se chiederle insieme alla conferma dei task, se ricavarle anche dal comportamento (task spostati, orari scelti spesso) e cosa fare se l'utente abbandona la domanda.
 - [ ] **Continuare il libretto delle tecnologie (`docs/`):** fatti l'indice e i capitoli 1 (Pydantic), 2 (Ollama e LLM locali) e 10 (FastAPI). Mancano `architettura.md` e i capitoli 3–9 (LangGraph, CP-SAT, la pagina web, PostgreSQL e psycopg, Alembic, embedding e pgvector, test e valutazione). Ogni esempio va provato davvero prima di scriverlo.
 - [ ] Database (PostgreSQL)
