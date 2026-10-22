@@ -16,9 +16,11 @@ class LangChainOllamaClient(LLMClient):
         model: str,
         host: str = "http://localhost:11434",
         temperature: float = 0.0,
-        num_ctx: int = 8192,
+        num_ctx: int = 4096,
         num_predict: int = 2048,
         repeat_penalty: float | None = None,
+        num_gpu: int | None = None,
+        keep_alive: str | None = None,
         max_retries: int = 2,
     ) -> None:
         super().__init__(max_retries)
@@ -28,6 +30,8 @@ class LangChainOllamaClient(LLMClient):
         self.num_ctx = num_ctx
         self.num_predict = num_predict
         self.repeat_penalty = repeat_penalty
+        self.num_gpu = num_gpu
+        self.keep_alive = keep_alive
         self._llms: dict[type[BaseModel], ChatOllama] = {}
 
     def _llm_for(self, schema: type[BaseModel]) -> ChatOllama:
@@ -40,6 +44,8 @@ class LangChainOllamaClient(LLMClient):
                 num_ctx=self.num_ctx,
                 num_predict=self.num_predict,
                 repeat_penalty=self.repeat_penalty,
+                num_gpu=self.num_gpu,  # None: li stima Ollama
+                keep_alive=self.keep_alive,  # None: il default di Ollama (5 minuti)
                 format=schema.model_json_schema(),
             )
         return self._llms[schema]

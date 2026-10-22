@@ -73,9 +73,15 @@ def test_cosine_similarity_of_a_zero_vector_is_an_error():
 
 
 def test_factory_builds_an_ollama_embedder_from_the_settings():
-    settings = Settings(embed_model="altro-modello", ollama_host="http://ollama:9999")
+    settings = Settings(
+        _env_file=None,
+        embed_model="altro-modello",
+        ollama_host="http://ollama:9999",
+        llm_keep_alive="45m",
+    )
 
     embedder = build_embedder(settings)
 
     assert isinstance(embedder, OllamaEmbedder)
     assert (embedder.model, embedder.host) == ("altro-modello", "http://ollama:9999")
+    assert embedder.keep_alive == "45m"  # resta caricato quanto l'LLM
