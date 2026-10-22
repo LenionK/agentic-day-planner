@@ -150,6 +150,22 @@ python -m alembic upgrade head      # creates the tables
 Settings (models, Ollama host, context size, temperature, database URL...) are in `.env`; the
 defaults work with a local Ollama and the Docker database.
 
+**Speed: keep the model on the GPU.** After a first plan, run `ollama ps`: the PROCESSOR column
+should say `100% GPU`. Ollama estimates the memory it needs with a wide margin and, on a 6 GB card,
+leaves part of `qwen2.5:7b` on the CPU, which slows every token down. If you see a CPU share, set
+`LLM_NUM_GPU=99` in `.env` to put every layer on the GPU. Measured on a GTX 1060 6GB:
+
+| `.env` | Where the model runs | Tokens/s | Parser, per sentence |
+|---|---|---|---|
+| `LLM_NUM_CTX=8192`, `LLM_NUM_GPU` unset | 21% CPU / 79% GPU | 11 | 13.0 s |
+| `LLM_NUM_CTX=4096` (default), `LLM_NUM_GPU=99` | 100% GPU, with `nomic-embed-text` too | 22–24 | 8.6 s |
+
+Same answers on the parser evaluation (8/13 cases, same per-field scores). Do not lower
+`LLM_NUM_CTX` below what the prompts need (the parser reads ~860 tokens and writes ~200): beyond
+the limit Ollama cuts the text without any error. `LLM_KEEP_ALIVE` (default `30m`) keeps the models
+loaded between plans, so the next one does not wait for a reload. If the model no longer loads
+after setting `LLM_NUM_GPU`, the card is too small (or busy with other programs): remove it.
+
 ## Usage
 
 Start Ollama and Docker **first**, then the interface:
@@ -175,8 +191,8 @@ The buttons next to the title open **📅 Storico** (the saved days with their p
 weeks are deleted when the app starts; preferences are kept.
 
 Without the database the planner still works, but plans and preferences are not saved (a warning
-says so); as soon as the database answers, the app uses it. On a GTX 1060 6GB each LLM call takes
-about 5–15 seconds; the solver and the embeddings are fast. The interface is in Italian, like the
+says so); as soon as the database answers, the app uses it. On a GTX 1060 6GB, with the model all
+on the GPU, each LLM call takes about 3–10 seconds; the solver and the embeddings are fast. The interface is in Italian, like the
 prompts. After changing the code, restart Streamlit: the graph is cached.
 
 ### Web page and API
