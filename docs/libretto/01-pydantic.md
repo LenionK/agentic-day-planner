@@ -213,8 +213,8 @@ davvero ([editor.py:84](../../src/planner/agents/editor.py#L84)).
 
 **Sintomo:** dopo aver modificato un orario nell'interfaccia compariva
 *"invalid time format: '17:00:00.000', expected 'HH:MM'"*.
-**Causa:** la tabella di Streamlit restituisce gli orari modificati come stringhe ISO
-(dettagli nel [capitolo 5](05-streamlit.md)).
+**Causa:** la tabella dell'interfaccia Streamlit (presente fino alla v0.3.0) restituiva gli
+orari modificati come stringhe ISO, con secondi e millesimi.
 **Perché è una buona notizia:** il `field_validator` di `TaskEdit` ha fatto il suo lavoro.
 Il dato sbagliato si è fermato al confine con un messaggio chiaro, invece di diventare un
 orario strano nel piano. La correzione è stata convertire il formato nell'interfaccia, non

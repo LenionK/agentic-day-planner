@@ -4,6 +4,30 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Web page redesigned** following design rules: steps indicator (Task → Piano → Critico →
+  Preferenze → Fine), wait and errors next to the clicked button, the form collapses into one
+  line during a plan ("Nuova pianificazione" asks before discarding it), one primary action per
+  screen (blue; red only for what deletes), the plan as a timeline with the free time, outcome
+  and calendar download first on the final screen, works at phone width.
+- **Faster LLM calls**: new settings `LLM_NUM_GPU` (GPU layers; `99` puts all of qwen2.5:7b on a
+  6 GB card) and `LLM_KEEP_ALIVE` (models stay loaded, `30m` by default); `LLM_NUM_CTX` defaults
+  to 4096. Measured on a GTX 1060 6GB: 11 → 22–24 tokens/s, parser 13.0 → 8.6 s per sentence,
+  same evaluation results.
+- The API turns on strict checkpoints (`LANGGRAPH_STRICT_MSGPACK`), as the tests do.
+- README: a compact overview of the graph, the full graph in a collapsible section.
+
+### Removed
+
+- **Streamlit interface**: the web page served by the API replaces it. It is still in v0.3.0.
+
+### Fixed
+
+- The 📅 Storico and 🧠 Preferenze buttons stayed visible without the database.
+
 ## [0.3.0] - 2026-10-20
 
 The planner now remembers: plans are saved day by day, preferences are learned from the user's

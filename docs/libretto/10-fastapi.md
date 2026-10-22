@@ -22,12 +22,12 @@ connessioni e le passa all'app.
 
 ## Perché qui
 
-Fino alla versione 0.2 il grafo lo usava solo l'interfaccia Streamlit, nello stesso processo
-Python. Con l'API qualunque programma può pianificare una giornata: è il primo passo verso
+Fino alla versione 0.2 il grafo lo usava solo un'interfaccia Streamlit, nello stesso processo
+Python (è rimasta fino alla v0.3.0, poi la pagina web servita dall'API l'ha sostituita). Con l'API qualunque programma può pianificare una giornata: è il primo passo verso
 altri client (un'app, l'export del calendario `.ics`).
 
 Il punto interessante è che **il grafo non è cambiato**. La stessa conversazione che
-Streamlit gestisce con lo stato della sessione, qui diventa una sequenza di richieste HTTP
+Streamlit gestiva con lo stato della sessione, qui diventa una sequenza di richieste HTTP
 legate da un `thread_id`. È il vantaggio di aver tenuto il grafo separato dall'interfaccia.
 
 ## Concetti chiave
@@ -145,8 +145,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 ```
 
-Ogni endpoint ritrova il grafo in `app.state.graph`. È l'equivalente di `cache_resource` in
-Streamlit ([capitolo 5](05-streamlit.md)).
+Ogni endpoint ritrova il grafo in `app.state.graph`.
 
 ### La funzione che crea l'app
 
@@ -249,7 +248,7 @@ posto di Ollama i test girano in pochi secondi e danno sempre lo stesso risultat
 
 ### Gli altri endpoint: storico, preferenze, errori del database
 
-Per fare tutto quello che fa Streamlit, all'API servono anche:
+Per un'interfaccia completa, all'API servono anche:
 
 | Endpoint | Cosa fa |
 |---|---|
@@ -273,7 +272,7 @@ def database_down(request: Request, exc: psycopg.OperationalError) -> JSONRespon
 
 ### Una pagina web: un altro client della stessa API
 
-Su `http://127.0.0.1:8000/` l'API serve una pagina con le stesse schermate di Streamlit. La
+Su `http://127.0.0.1:8000/` l'API serve la pagina web del planner. La
 pagina **non ha niente di speciale**: è un client come i test, `/docs` o PowerShell, e ogni
 passo è una richiesta all'API. È la prova che la separazione funziona.
 
@@ -322,7 +321,7 @@ scelta fatta col bottone 🌙/☀️, salvata nel browser con `localStorage`.
 - [export/ics.py](../../src/planner/export/ics.py): la giornata salvata come file `.ics`.
 - [api/static/app.js](../../src/planner/api/static/app.js): la pagina web; `api()` per le
   richieste, `render()` sceglie la schermata dallo `step`, `diffEdits()` manda solo i campi
-  cambiati (come `diff_edits` di Streamlit).
+  cambiati.
 - [tests/unit/test_api.py](../../tests/unit/test_api.py): i test, compreso un piano
   completo, una risposta sbagliata seguita da quella giusta, il salvataggio con un archivio
   finto e lo stesso piano scaricato come calendario.
@@ -385,8 +384,7 @@ gli accenti si vedono bene.
 ### Limiti che restano (per ora)
 
 - **Il database si controlla solo all'avvio.** Se Docker si accende dopo, serve riavviare il
-  server; Streamlit invece riprova a ogni interazione. (Se invece si spegne dopo, le
-  richieste ricevono un 503 chiaro.)
+  server. (Se invece si spegne dopo, le richieste ricevono un 503 chiaro.)
 - **I grafi in pausa vivono in memoria** (`InMemorySaver`): se il server si riavvia, le
   pianificazioni a metà si perdono, e con più processi uvicorn ognuno avrebbe la sua memoria.
   Un checkpointer su PostgreSQL risolverebbe entrambi i problemi.
@@ -424,7 +422,7 @@ gli accenti si vedono bene.
    *Verifica:* `confirm_tasks` e la tabella dei task. È lo stesso JSON di `/docs`, letto da
    un altro client: l'API non sa chi la sta usando.
 7. **Nel calendario.** Apri nel browser `http://127.0.0.1:8000/days/AAAA-MM-GG/plan.ics` con
-   una data che hai salvato (la trovi nello 📅 Storico di Streamlit) e importa il file nel tuo
+   una data che hai salvato (la trovi nello 📅 Storico della pagina) e importa il file nel tuo
    calendario (in Google Calendar: *Impostazioni → Importa ed esporta*). *Verifica:* gli
    eventi sono all'ora giusta e hanno la tua frase nella descrizione. Poi importa lo stesso
    file una seconda volta e guarda come si comporta la tua app con gli `UID` già visti:

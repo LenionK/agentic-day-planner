@@ -111,7 +111,8 @@ flowchart TD
 - **The user confirms what is remembered.** A wrong preference would affect every future day:
   the model extracts, the user decides.
 - **The user decides, the graph applies.** The interface only collects choices; validation and
-  rules live in the graph, so any caller (web UI, future API, future agent) behaves the same.
+  rules live in the graph, so any caller (the web page, another API client, a future agent)
+  behaves the same.
 - **LLM calls and questions in separate nodes.** A resumed node restarts from the beginning, so a
   node with an `interrupt` never calls the LLM or writes to the database.
 - **Never fail silently.** Removed times, skipped edits, dropped suggestions, rejected tasks and
@@ -137,7 +138,7 @@ cd agentic-day-planner
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 
-python -m pip install -e ".[dev,ui]"
+python -m pip install -e ".[dev]"
 
 ollama pull qwen2.5:7b              # the LLM
 ollama pull nomic-embed-text        # the embedding model for the preferences
@@ -168,48 +169,42 @@ after setting `LLM_NUM_GPU`, the card is too small (or busy with other programs)
 
 ## Usage
 
-Start Ollama and Docker **first**, then the interface:
+Start Ollama and Docker **first**, then the API, which also serves the web page:
 
 ```bash
-python -m streamlit run src/planner/ui/app.py
+python -m uvicorn planner.api.app:app --reload
 ```
 
-It opens at <http://localhost:8501>:
+Open <http://127.0.0.1:8000/>:
 
-1. Pick the day (tomorrow by default), write what you have to do and press **Enter**.
+1. Pick the day (tomorrow by default), write what you have to do and press **Enter**. The form
+   closes into one line with the day and the sentence; the steps at the top (Task → Piano →
+   Critico → Preferenze → Fine) show where you are.
 2. Check the tasks, edit the table if needed, and press *Conferma e pianifica*. If the day already
    has a plan, its tasks are shown apart: the new ones are added in the free time, or press
    *Sostituisci il piano salvato* to replace it.
 3. If some tasks don't fit, accept the plan or go back to the tasks.
 4. Read the critic's comment, the preferences it considered and, if the day looks empty, its
    suggestions.
-5. If the sentence expressed a preference, confirm which ones to remember. The results of saving
-   are shown at the bottom.
+5. If the sentence expressed a preference, confirm which ones to remember.
+6. The final screen starts with the outcome and **📥 Scarica nel calendario** (an `.ics` file for
+   Outlook, Google Calendar or the phone), then the plan as a timeline and the critic.
 
 The buttons next to the title open **📅 Storico** (the saved days with their plans) and
-**🧠 Preferenze** (the remembered preferences, each one can be deleted). Days older than two
-weeks are deleted when the app starts; preferences are kept.
+**🧠 Preferenze** (the remembered preferences, each one can be deleted); 🌙/☀️ switches the dark
+theme, which otherwise follows the system. *Nuova pianificazione* starts again, and asks first if
+a plan is in progress. Days older than two weeks are deleted when the API starts; preferences
+are kept.
 
 Without the database the planner still works, but plans and preferences are not saved (a warning
-says so); as soon as the database answers, the app uses it. On a GTX 1060 6GB, with the model all
-on the GPU, each LLM call takes about 3–10 seconds; the solver and the embeddings are fast. The interface is in Italian, like the
-prompts. After changing the code, restart Streamlit: the graph is cached.
+says so); start Docker and restart the API to use it. With the model all on the GPU of a GTX 1060
+6GB, each LLM call takes about 3–10 seconds; the solver and the embeddings are fast. The interface
+is in Italian, like the prompts. A Streamlit interface was available up to v0.3.0.
 
-### Web page and API
+### API
 
-The same graph is available as a REST API (FastAPI), with a web page that uses it:
-
-```bash
-python -m uvicorn planner.api.app:app --reload
-```
-
-- <http://127.0.0.1:8000/> is the **web page**: the same screens as the Streamlit interface
-  (task table, plan review, critic, preferences, final plan), the 📅 Storico and 🧠 Preferenze
-  windows, a *Scarica nel calendario* link for the saved plan, and a dark theme (it follows the
-  system, or the 🌙/☀️ button). Every screen is a request to the API.
-- <http://127.0.0.1:8000/docs> is the interactive **API documentation**.
-
-A plan is a conversation of a few requests:
+<http://127.0.0.1:8000/docs> is the interactive documentation. The web page is one client of the
+API; any program can plan a day the same way. A plan is a conversation of a few requests:
 
 | Request | What it does |
 |---------|--------------|
@@ -224,9 +219,9 @@ The answer has the format of the question: `{"edits": {}}` to confirm the tasks,
 `{"accept": true}` for the plan review, `{"accepted": [0]}` for the suggestions,
 `{"keep": [0], "delete": []}` for the preferences. Invalid answers get a 422 and the question
 stays open; an unknown `thread_id` gets a 404, a finished plan a 409. Paused plans live in memory:
-they are lost when the server restarts. As in Streamlit, days older than two weeks are deleted at
-startup (`/health` says how many), and without the database plans are not saved; if the database
-stops answering later, requests that need it get a 503.
+they are lost when the server restarts. Days older than two weeks are deleted at startup (`/health`
+says how many), and without the database plans are not saved; if the database stops answering
+later, requests that need it get a 503.
 
 The calendar events are in the time zone set by `TIMEZONE` in `.env` (default `Europe/Rome`); each
 event has a stable UID (date + task id), so a calendar can tell a re-imported event from a new one.
@@ -286,7 +281,6 @@ src/planner/
   solver/   Pydantic models and CP-SAT scheduler
   llm/      LLMClient and Embedder interfaces, Ollama and LangChain clients, factory
   db/       store and preferences (SQL), repository (what the graph uses), Alembic migrations
-  ui/       Streamlit interface and edit diffing
   api/      FastAPI app (endpoints), request/response models, static/ web page (HTML, JS, CSS)
   export/   a saved day as an iCalendar (.ics) file
   dates.py  dates in Italian
@@ -302,12 +296,12 @@ docs/          booklet on the technologies used, in Italian
 
 Working: parser, user confirmation and edits, scheduler, conflict resolution, plan review, day
 critic with suggestions, PostgreSQL storage with merge or replace of a saved day, history and
-purge of old days, memory of preferences with pgvector, Streamlit interface, REST API with FastAPI,
-`.ics` export, and a web page served by the API.
+purge of old days, memory of preferences with pgvector, REST API with FastAPI, `.ics` export, and
+a web page served by the API.
 
 Next:
 
-- **Interface**: a clearer, more guided design for the web page
+- **Interface**: one card per task instead of the table on a phone, editable preference texts
 - **Preferences**: review when they are saved, review the vector search, make the critic's use
   of them more reliable
 - A PostgreSQL checkpointer, so paused plans survive a restart of the API

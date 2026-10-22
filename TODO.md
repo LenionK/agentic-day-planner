@@ -16,7 +16,7 @@
 - [x] Conferma dell'utente con `interrupt`: riepilogo JSON (orari "HH:MM", scartati con motivo, avvisi; senza `source`), risposta validata con `response_schema`
 - [x] Editor: applica le correzioni (priorità, obbligo, durata) con validazione e avvisi; checkpoint in modalità strict nei test
 - [x] Correzioni degli orari (fisso, dopo le, entro le): "HH:MM" nella risposta, l'editor converte in minuti; orario vuoto = vincolo tolto
-- [x] Interfaccia Streamlit (`src/planner/ui/app.py`): tabella modificabile (checkbox, menu 1–5, durata, selettore orari), invio con Invio, "Continua senza modifiche"
+- [x] Interfaccia Streamlit (`src/planner/ui/app.py`): tabella modificabile (checkbox, menu 1–5, durata, selettore orari), invio con Invio, "Continua senza modifiche". Rimossa dopo la v0.3.0: la sostituisce la pagina web servita dall'API
 - [x] Revisione del piano: secondo `interrupt` dopo lo scheduler e arco condizionale; "accetta" → fine, "modifica" → di nuovo la conferma dei task, già corretti
 - [x] Gestione dei conflitti, con instradamento dopo lo scheduler: tutto inserito → fine; task esclusi → revisione; obbligatori in conflitto → `resolve_conflict` (solo i task in conflitto, risposta nel formato delle correzioni) → editor → scheduler
 - [x] Critico della giornata (`agents/critic.py`): buchi liberi e fatti calcolati in Python; nodo `critic` con LLM (valutazione → vuota sì/no → proposte) e nodo `suggest_activities` con interrupt; proposte che non entrano in nessun buco scartate con avviso; nell'interfaccia piano, fatti come dati e commento come opinione
@@ -24,11 +24,11 @@
 ## Prossimi passi
 - [ ] **Migliorare l'interfaccia:** oggi alcune cose non si notano (la domanda sulle preferenze arriva solo alla fine e solo se la frase ne contiene una; i messaggi della memoria sono piccoli). Da rivedere: ordine delle schermate, messaggi più chiari, indicare in che passo del flusso si è, testi delle preferenze modificabili nella conferma.
   - [x] pagina web, revisione con regole di design (euristiche di Nielsen, gerarchia visiva, vicinanza): indicatore dei passi, attesa ed errori accanto al bottone premuto, modulo chiuso in una riga durante la pianificazione con "Nuova pianificazione" che chiede prima di perdere il piano, un'azione principale per schermata (blu; rosso solo per ciò che cancella), piano come linea del tempo con il tempo libero, esito e download in cima al piano finale, dettagli in una sezione richiudibile, niente messaggi doppi, prova a 390 px
-  - [ ] le stesse scelte nell'interfaccia Streamlit (o tenere solo la pagina web)
+  - [x] una sola interfaccia: Streamlit rimossa (resta nel tag v0.3.0), si tiene la pagina web
   - [ ] la tabella dei task su telefono scorre di lato: valutare una scheda per task
   - [ ] testi delle preferenze modificabili nella conferma; chiedere le preferenze prima (tocca il grafo, vedi sotto)
 - [ ] **Rivedere quando salvare le preferenze:** oggi si estraggono solo dopo il salvataggio del piano e si confermano in una schermata a parte alla fine; valutare se chiederle insieme alla conferma dei task, se ricavarle anche dal comportamento (task spostati, orari scelti spesso) e cosa fare se l'utente abbandona la domanda.
-- [ ] **Continuare il libretto delle tecnologie (`docs/`):** fatti l'indice e i capitoli 1 (Pydantic), 2 (Ollama e LLM locali) e 10 (FastAPI). Mancano `architettura.md` e i capitoli 3–9 (LangGraph, CP-SAT, Streamlit, PostgreSQL e psycopg, Alembic, embedding e pgvector, test e valutazione). Ogni esempio va provato davvero prima di scriverlo.
+- [ ] **Continuare il libretto delle tecnologie (`docs/`):** fatti l'indice e i capitoli 1 (Pydantic), 2 (Ollama e LLM locali) e 10 (FastAPI). Mancano `architettura.md` e i capitoli 3–9 (LangGraph, CP-SAT, la pagina web, PostgreSQL e psycopg, Alembic, embedding e pgvector, test e valutazione). Ogni esempio va provato davvero prima di scriverlo.
 - [ ] Database (PostgreSQL)
   - [x] schema con Alembic: `days` (una per data) e `tasks` (chiave esterna con `ON DELETE CASCADE`)
   - [x] `store.py` (salva, rilegge, sostituisce in una transazione) e test di integrazione su `planner_test`
@@ -52,7 +52,7 @@
   - [x] pagina web servita dall'API (`api/static/`: HTML, CSS, JavaScript con `fetch`): le stesse schermate di Streamlit, Storico e Preferenze in finestre `<dialog>`, link al `.ics`, tema scuro (sistema o bottone); testi sempre con `textContent`. Per la pagina: `GET /days`, `GET /preferences`, `DELETE /preferences/{id}`, task confermati con lo slot nel piano finale, pulizia all'avvio, 503 se il DB si spegne dopo l'avvio
   - [x] pagina web: regole di design per un'interfaccia più chiara e guidata (vedi "Migliorare l'interfaccia")
   - [ ] checkpointer su PostgreSQL: oggi i piani in pausa vivono in memoria e si perdono al riavvio del server
-  - [ ] il DB si controlla solo all'avvio: riprovare come fa Streamlit, o dirlo in `/health`
+  - [ ] il DB si controlla solo all'avvio: riprovare a ogni richiesta (come faceva Streamlit), o dirlo in `/health`
 - [ ] Eval dei modelli (Qwen2.5 7B, Phi-4 mini, Llama 3.1 8B, Aya Expanse 8B) sulla GTX 1060
 - [ ] CI con GitHub Actions, AWS con LocalStack e CDK
 
@@ -92,7 +92,7 @@
 - **Obbligatorio ⇒ priorità 5:** lo impongono in Python il Parser e l'editor, non il modello. Non è un validator di `Task`: per lo scheduler obbligo e priorità restano indipendenti.
 - **Conferma dell'utente:** il riepilogo non mostra il `source` (serve solo al grounding del Parser). La risposta contiene solo le differenze (`{"edits": {"t2": {"priority": 2}}}`, `{"edits": {}}` = confermo tutto), non la lista completa.
 - **Editor separato da chi decide:** interfaccia e futuro agente producono lo stesso formato di correzioni; l'editor le valida e le applica. Correzione su id inesistente o che rende il task invalido: ignorata per intero, con avviso.
-- **Interfaccia:** Streamlit per ora (solo Python); FastAPI quando servirà un'API vera (`.ics`, altri client). Il grafo non cambia.
+- **Interfaccia:** prima Streamlit (solo Python); poi FastAPI con una pagina web (HTML, CSS, JavaScript) che usa l'API; dopo la v0.3.0 Streamlit è stato rimosso, per non tenere allineate due interfacce. Il grafo non è mai cambiato.
 - **Database, una giornata per data:** vincolo `UNIQUE (day_date)` come ultima difesa. Il controllo avviene subito dopo il parser, non alla fine: se la data esiste già, i task salvati entrano nella conferma (non modificabili, bloccati al loro orario) e l'unione è il comportamento normale; "Sostituisci il piano salvato" li scarta. Alla fine la giornata viene riscritta in una transazione (i task vecchi spariscono con `ON DELETE CASCADE`). Così il Critico valuta la giornata intera. Per non toccare il piano salvato basta non confermare: si salva solo alla fine.
 - **Preferenze, vettori e giudice:** gli embedding misurano l'argomento, non la polarità ("studiare la mattina" e "la sera" hanno similarità 0.93, più di molte parafrasi): il vettore sceglie solo le candidate (la nuova come query contro le salvate come document, soglia 0.63: separa meglio di clustering/clustering, e basta una colonna anche per il recupero), un LLM giudica se sono la stessa preferenza, e le contraddizioni le risolve l'utente nella conferma, dove vede le salvate simili e può cancellarle.
 - **Preferenze confermate dall'utente:** una preferenza sbagliata condizionerebbe tutte le giornate future; il modello estrae, l'utente decide. Il testo deve essere in italiano: con lingue diverse la similarità crolla e le contraddizioni non vengono mostrate.

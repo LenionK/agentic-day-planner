@@ -16,7 +16,7 @@ LLM locale, un flusso ad agenti, un ottimizzatore e un database.
 - Un po' di SQL: `SELECT`, `INSERT`, `JOIN`.
 - La riga di comando: aprire un terminale, lanciare un comando, leggere un errore.
 
-Tutto il resto (Pydantic, LangGraph, CP-SAT, Streamlit, Alembic, embedding…) lo spiega il
+Tutto il resto (Pydantic, LangGraph, CP-SAT, Alembic, embedding, la pagina web…) lo spiega il
 libretto partendo da zero.
 
 ## Percorso di lettura
@@ -39,7 +39,7 @@ Ogni capitolo si legge anche da solo, ma i rimandi presuppongono questo ordine.
 | 2 | [Ollama e LLM locali](libretto/02-ollama-llm.md) | libreria 0.6.3, modello `qwen2.5:7b` | Far girare un modello sul proprio PC, output strutturato, scrivere prompt |
 | 3 | [LangGraph](libretto/03-langgraph.md) | 1.2.14 | Stato, nodi, archi condizionali, cicli, pause per l'utente (`interrupt`), checkpointer |
 | 4 | [OR-Tools CP-SAT](libretto/04-ortools-cpsat.md) | 9.15 | Descrivere un problema di orari come vincoli e lasciare al solver la soluzione ottima |
-| 5 | [Streamlit](libretto/05-streamlit.md) | 1.66.0 | Interfacce web in Python, modello di riesecuzione, stato di sessione, cache, dialog |
+| 5 | [La pagina web](libretto/05-pagina-web.md) | HTML, CSS, JavaScript (nessuna libreria) | Costruire la pagina con il DOM, `fetch`, schermate guidate dallo stato, regole di design, tema scuro |
 | 6 | [PostgreSQL e psycopg](libretto/06-postgresql-psycopg.md) | PostgreSQL 16, psycopg 3.3.6 | Chiavi esterne, vincoli, view, procedure, query parametrizzate, transazioni |
 | 7 | [Alembic](libretto/07-alembic.md) | 1.20.0 | Migrazioni del database versionate, upgrade e downgrade |
 | 8 | [Embedding e pgvector](libretto/08-embedding-pgvector.md) | `nomic-embed-text`, immagine `pgvector/pgvector:pg16` | Trasformare frasi in vettori, similarità coseno, ricerca nel database, i limiti dei vettori |
@@ -47,7 +47,7 @@ Ogni capitolo si legge anche da solo, ma i rimandi presuppongono questo ordine.
 | 10 | [FastAPI](libretto/10-fastapi.md) | fastapi 0.143.0, uvicorn 0.54.0 | Un'API web: endpoint, validazione delle richieste, codici di stato, una conversazione con il grafo in più richieste, un file da scaricare, una pagina web che la usa |
 
 Le versioni sono quelle installate nel progetto. Contano: librerie come LangGraph e
-Streamlit cambiano spesso, e un esempio scritto per un'altra versione può non funzionare.
+FastAPI cambiano spesso, e un esempio scritto per un'altra versione può non funzionare.
 Quando consulti la documentazione ufficiale, controlla che sia quella della versione giusta
 (`python -m pip show <libreria>` mostra quella installata).
 
