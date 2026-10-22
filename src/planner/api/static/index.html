@@ -1,16 +1,18 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agentic Day Planner</title>
   <link rel="stylesheet" href="/static/style.css">
   <script>
-    // il tema scelto col bottone, applicato prima di disegnare: niente lampo bianco
-    // all'apertura. Senza una scelta salvata la pagina segue il tema del sistema
+    // tema e lingua scelti l'ultima volta, applicati prima di disegnare: niente lampo bianco
+    // all'apertura. Senza una scelta salvata il tema segue il sistema e la lingua è l'inglese
     try {
-      const saved = localStorage.getItem("theme");
-      if (saved === "dark" || saved === "light") document.documentElement.dataset.theme = saved;
+      const theme = localStorage.getItem("theme");
+      if (theme === "dark" || theme === "light") document.documentElement.dataset.theme = theme;
+      const language = localStorage.getItem("language");
+      if (language === "en" || language === "it") document.documentElement.lang = language;
     } catch {}
   </script>
 </head>
@@ -19,12 +21,12 @@
     <header class="top">
       <h1>Agentic day planner</h1>
       <div class="buttons header-actions">
-        <!-- le azioni che valgono per tutta l'app; nascoste finché non si sa se il database c'è -->
+        <!-- lo storico è contenuto: senza database non c'è, e il bottone resta nascosto -->
         <nav class="buttons" id="actions" hidden>
-          <button type="button" id="open-history">📅 Storico</button>
-          <button type="button" id="open-preferences">🧠 Preferenze</button>
+          <button type="button" id="open-history" data-i18n="history">📅 History</button>
         </nav>
-        <button type="button" id="theme"></button>
+        <!-- le impostazioni valgono per tutta l'app: lingua, tema, preferenze ricordate -->
+        <button type="button" id="open-settings" data-i18n="settings">⚙️ Settings</button>
       </div>
     </header>
 
@@ -32,15 +34,18 @@
 
     <!-- dentro un form, Invio nel campo di testo equivale al bottone -->
     <form id="new-plan" class="card">
-      <label>Giorno
+      <label><span data-i18n="day">Day</span>
         <input type="date" id="day" required>
       </label>
-      <label>Cosa devi fare?
-        <input type="text" id="text" autocomplete="off"
+      <label><span data-i18n="sentence">What do you have to do?</span>
+        <input type="text" id="text" autocomplete="off" lang="it" aria-describedby="sentence-hint"
+               data-i18n-placeholder="sentence_example"
                placeholder="devo studiare 2 ore, dentista alle 15, se riesco la spesa">
       </label>
+      <p class="caption" id="sentence-hint" data-i18n="sentence_hint">
+        Write it in Italian: the planner reads Italian sentences.</p>
       <div class="buttons">
-        <button type="submit" class="primary">Pianifica</button>
+        <button type="submit" class="primary" data-i18n="plan">Plan</button>
       </div>
     </form>
 
@@ -52,18 +57,46 @@
   </main>
 
   <dialog id="history-dialog">
-    <header><h2>Storico</h2><button type="button" class="close" aria-label="Chiudi">✕</button></header>
+    <header>
+      <h2 data-i18n="history">📅 History</h2>
+      <button type="button" class="close" data-i18n-label="close" aria-label="Close">✕</button>
+    </header>
     <div class="dialog-body"></div>
   </dialog>
 
-  <dialog id="preferences-dialog">
-    <header><h2>Preferenze ricordate</h2><button type="button" class="close" aria-label="Chiudi">✕</button></header>
-    <div class="dialog-body"></div>
+  <dialog id="settings-dialog">
+    <header>
+      <h2 data-i18n="settings">⚙️ Settings</h2>
+      <button type="button" class="close" data-i18n-label="close" aria-label="Close">✕</button>
+    </header>
+    <div class="dialog-body">
+      <section class="setting">
+        <h3 id="language-title" data-i18n="language_group">Language</h3>
+        <!-- ogni lingua con il suo nome scritto nella lingua stessa, senza bandiere: una
+             bandiera indica un paese, non una lingua. aria-pressed dice quale è scelta -->
+        <div class="segmented" id="language" role="group" aria-labelledby="language-title">
+          <button type="button" data-language="en" lang="en">English</button>
+          <button type="button" data-language="it" lang="it">Italiano</button>
+        </div>
+      </section>
+      <section class="setting">
+        <h3 id="theme-title" data-i18n="theme">Theme</h3>
+        <div class="segmented" id="theme" role="group" aria-labelledby="theme-title">
+          <button type="button" data-theme-choice="system" data-i18n="theme_system">System</button>
+          <button type="button" data-theme-choice="light" data-i18n="theme_light">☀️ Light</button>
+          <button type="button" data-theme-choice="dark" data-i18n="theme_dark">🌙 Dark</button>
+        </div>
+      </section>
+      <section class="setting">
+        <h3 data-i18n="remembered_preferences">Remembered preferences</h3>
+        <div id="preferences-list"></div>
+      </section>
+    </div>
   </dialog>
 
   <div id="toast" hidden></div>
 
-  <!-- type="module": le variabili dello script restano sue, senza toccare quelle globali -->
+  <!-- type="module": le variabili dello script restano sue, e può importare i18n.js -->
   <script type="module" src="/static/app.js"></script>
 </body>
 </html>

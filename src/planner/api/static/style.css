@@ -172,7 +172,23 @@ a { color: var(--link); }
 
 .header-actions { margin-top: 0; align-items: center; }
 .header-actions nav { margin-top: 0; }
-#theme { padding: 6px 10px; }
+
+/* un gruppo di scelte (lingua, tema): bottoni attaccati, quello scelto evidenziato */
+.segmented { display: inline-flex; flex-wrap: wrap; }
+.segmented button { border-radius: 0; padding: 6px 12px; margin-left: -1px; }
+.segmented button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
+.segmented button:last-child { border-radius: 0 8px 8px 0; }
+.segmented button[aria-pressed="true"] {
+  background: var(--surface); border-color: var(--primary); color: var(--text); font-weight: 600;
+  position: relative; /* il bordo blu sopra quello del vicino */
+}
+
+#sentence-hint { margin: -6px 0 8px; }
+
+/* le sezioni delle impostazioni */
+.setting { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.setting:last-child { border-bottom: none; }
+.setting h3 { margin: 0 0 8px; }
 
 /* il modulo chiuso durante la pianificazione: giorno e frase a sinistra, azione a destra */
 .summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }

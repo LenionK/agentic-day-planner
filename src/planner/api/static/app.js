@@ -1,6 +1,8 @@
 // La pagina web del planner: un client dell'API, come lo sono i test e /docs.
 // Ogni schermata è una domanda del grafo, e ogni risposta una richiesta HTTP.
 
+import { LANGUAGES, STRINGS } from "./i18n.js";
+
 // ---------------------------------------------------------------- stato della pagina
 
 const state = {
@@ -9,12 +11,79 @@ const state = {
   text: null, // la frase della pianificazione in corso
   done: false, // il grafo è arrivato alla fine: ricominciare non perde niente
   database: false, // se l'API ha il database (piani salvati, storico, preferenze)
+  language: savedLanguage(), // la lingua della pagina e dei messaggi chiesti all'API
+  last: null, // l'ultima risposta dell'API: cambiando lingua, la schermata si ridisegna
+  bannerKey: null, // l'avviso in cima (senza database), da ritradurre cambiando lingua
 };
 
 const form = document.querySelector("#new-plan");
 const summaryBox = document.querySelector("#summary"); // il modulo chiuso in una riga
 const screenBox = document.querySelector("#screen");
 const errorBox = document.querySelector("#error"); // gli errori del modulo, sotto il modulo
+
+// ---------------------------------------------------------------- lingua
+
+// La lingua scelta l'ultima volta; la prima volta, l'inglese.
+function savedLanguage() {
+  try {
+    const saved = localStorage.getItem("language");
+    if (saved in LANGUAGES) return saved;
+  } catch {
+    // dati del browser bloccati: si usa il default
+  }
+  return "en";
+}
+
+// Il testo `key` nella lingua della pagina, con i {segnaposti} riempiti da `values`.
+function t(key, values = {}) {
+  const text = STRINGS[state.language][key] ?? STRINGS.en[key];
+  if (typeof text !== "string") return text; // liste e tabelle (giorni, mesi, categorie)
+  return text.replace(/\{(\w+)\}/g, (_, name) => String(values[name]));
+}
+
+// I testi scritti nell'HTML: ogni elemento dice con data-i18n quale testo gli spetta,
+// con data-i18n-placeholder e data-i18n-label quale segnaposto o etichetta accessibile.
+function translateStatic() {
+  document.documentElement.lang = state.language;
+  document.querySelectorAll("[data-i18n]").forEach((node) => {
+    node.textContent = t(node.dataset.i18n);
+    node.hidden = node.textContent === ""; // un testo vuoto in una lingua: niente riga vuota
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((node) => {
+    node.placeholder = t(node.dataset.i18nPlaceholder);
+  });
+  document.querySelectorAll("[data-i18n-label]").forEach((node) => {
+    node.setAttribute("aria-label", t(node.dataset.i18nLabel));
+  });
+  markChoices();
+}
+
+// Nei gruppi di scelta (lingua, tema) aria-pressed dice quale è scelta: lo stile la evidenzia
+// e un lettore di schermo la annuncia come "premuto".
+function markChoices() {
+  document.querySelectorAll("#language button").forEach((choice) => {
+    choice.setAttribute("aria-pressed", String(choice.dataset.language === state.language));
+  });
+  document.querySelectorAll("#theme button").forEach((choice) => {
+    choice.setAttribute("aria-pressed", String(choice.dataset.themeChoice === themeChoice()));
+  });
+}
+
+// Cambiare lingua ridisegna tutto quello che si vede. I messaggi già scritti dall'API per la
+// pianificazione in corso restano nella lingua in cui è cominciata.
+function setLanguage(language) {
+  state.language = language;
+  try {
+    localStorage.setItem("language", language);
+  } catch {
+    // nessun problema: la lingua vale fino alla chiusura
+  }
+  translateStatic();
+  if (state.bannerKey) showBanner(state.bannerKey);
+  if (state.threadId) collapseForm();
+  if (state.last) render(state.last, { scroll: false });
+  document.querySelectorAll("dialog[open]").forEach((dialog) => refill(dialog));
+}
 
 // ---------------------------------------------------------------- costruire la pagina
 
@@ -84,21 +153,20 @@ function isoDate(date) {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
-function italianDate(iso) {
-  const [year, month, day] = iso.split("-");
-  return `${day}/${month}/${year}`;
-}
-
-// scritti a mano come in planner/dates.py: non dipendono dalla lingua del browser
-const WEEKDAYS = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
-const MONTHS = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio",
-  "agosto", "settembre", "ottobre", "novembre", "dicembre"];
-
-function longItalianDate(iso) {
+function dateParts(iso) {
   const [year, month, day] = iso.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  return `${WEEKDAYS[date.getDay()]} ${day} ${MONTHS[month - 1]} ${year}`;
+  const weekday = new Date(year, month - 1, day).getDay();
+  return {
+    weekday: t("weekdays")[weekday],
+    day,
+    month: t("months")[month - 1],
+    month2: String(month).padStart(2, "0"),
+    year,
+  };
 }
+
+const longDate = (iso) => t("long_date", dateParts(iso)); // "Tuesday 3 November 2026"
+const shortDate = (iso) => t("short_date", dateParts(iso)); // "3 November 2026", "03/11/2026"
 
 function durationText(minutes) {
   const hours = Math.floor(minutes / 60);
@@ -112,8 +180,9 @@ function durationText(minutes) {
 
 // Una richiesta all'API: restituisce { ok, status, data }. Un errore di rete (server
 // spento) diventa status 0, così chi chiama gestisce tutto nello stesso modo.
+// Accept-Language chiede all'API i messaggi nella lingua della pagina.
 async function api(method, url, body) {
-  const options = { method, headers: {} };
+  const options = { method, headers: { "Accept-Language": state.language } };
   if (body !== undefined) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
@@ -123,7 +192,7 @@ async function api(method, url, body) {
     const data = response.status === 204 ? null : await response.json();
     return { ok: response.ok, status: response.status, data };
   } catch {
-    return { ok: false, status: 0, data: { detail: "API non raggiungibile: il server è acceso?" } };
+    return { ok: false, status: 0, data: { detail: t("api_down") } };
   }
 }
 
@@ -172,10 +241,10 @@ async function working(message, task, origin) {
 // ---------------------------------------------------------------- la conversazione
 
 async function startPlanning(text, dayDate, origin) {
-  const result = await working("Sto leggendo la frase...", () =>
+  const result = await working(t("reading"), () =>
     api("POST", "/plans", { text, day_date: dayDate }), origin);
   if (!result.ok) {
-    showError(`Errore ${result.status}: ${errorText(result.data.detail)}`);
+    showError(t("error_status", { status: result.status, detail: errorText(result.data.detail) }));
     return;
   }
   state.threadId = result.data.thread_id;
@@ -191,10 +260,10 @@ async function startPlanning(text, dayDate, origin) {
 function collapseForm() {
   form.hidden = true;
   const actions = el("div", { class: "buttons summary-actions" },
-    button("Nuova pianificazione", () => askRestart(actions)));
+    button(t("new_plan"), () => askRestart(actions)));
   summaryBox.replaceChildren(
     el("div", {},
-      el("strong", { text: longItalianDate(state.dayDate) }),
+      el("strong", { text: longDate(state.dayDate) }),
       caption(`«${state.text}»`)),
     actions);
   summaryBox.hidden = false;
@@ -208,15 +277,16 @@ function askRestart(actions) {
     return;
   }
   actions.replaceChildren(
-    el("span", { class: "caption", text: "Il piano in corso andrà perso." }),
-    button("Annulla", collapseForm),
-    button("Ricomincia", restart, "danger"));
+    el("span", { class: "caption", text: t("plan_lost") }),
+    button(t("cancel"), collapseForm),
+    button(t("restart"), restart, "danger"));
 }
 
 // Torna al modulo, con la frase di prima già scritta: spesso si vuole solo correggerla.
 function restart() {
   state.threadId = null;
   state.done = false;
+  state.last = null;
   clearErrors();
   screenBox.replaceChildren();
   summaryBox.hidden = true;
@@ -229,20 +299,20 @@ function restart() {
 
 // Risponde alla domanda in corso. Se la risposta non è valida (422) il grafo resta in pausa:
 // l'errore si mostra sopra i bottoni della stessa schermata, e si può correggere e riprovare.
-async function answer(response, errorPrefix, origin) {
-  const result = await working("Sto pianificando...", () =>
+async function answer(response, errorKey, origin) {
+  const result = await working(t("planning"), () =>
     api("POST", `/plans/${state.threadId}/resume`, { answer: response }), origin);
   if (result.status === 422) {
-    showError(`${errorPrefix}: ${errorText(result.data.detail)}`, origin);
+    showError(`${t(errorKey)}: ${errorText(result.data.detail)}`, origin);
     return;
   }
   if (result.status === 404) {
-    showError("Questa pianificazione non c'è più (il server è stato riavviato?). Riscrivi la frase.",
-      origin);
+    showError(t("plan_gone"), origin);
     return;
   }
   if (!result.ok) {
-    showError(`Errore ${result.status}: ${errorText(result.data.detail)}`, origin);
+    showError(t("error_status", { status: result.status, detail: errorText(result.data.detail) }),
+      origin);
     return;
   }
   render(result.data);
@@ -250,7 +320,7 @@ async function answer(response, errorPrefix, origin) {
 
 // Le fasi della pianificazione, e in quale fase cade ogni domanda del grafo ("step").
 // Una fase senza domande (tutti i task entrano: niente revisione) risulta comunque superata.
-const PHASES = ["Task", "Piano", "Critico", "Preferenze", "Fine"];
+const PHASES = ["phase_tasks", "phase_plan", "phase_critic", "phase_preferences", "phase_end"];
 const PHASE_OF_STEP = {
   confirm_tasks: 0,
   resolve_conflict: 0,
@@ -264,16 +334,17 @@ const PHASE_OF_STEP = {
 function progress(step) {
   const current = PHASE_OF_STEP[step];
   return el("div", { class: "progress" },
-    el("ol", { class: "steps", "aria-label": "Passi della pianificazione" },
-      ...PHASES.map((name, i) => el("li", {
+    el("ol", { class: "steps", "aria-label": t("steps") },
+      ...PHASES.map((key, i) => el("li", {
         class: i < current ? "done" : i === current ? "current" : null,
         "aria-current": i === current ? "step" : null,
-      }, el("span", { class: "dot", text: i < current ? "✓" : String(i + 1) }), name))));
+      }, el("span", { class: "dot", text: i < current ? "✓" : String(i + 1) }), t(key)))));
 }
 
 // La schermata dipende dalla domanda a cui il grafo aspetta risposta ("step").
-function render(data) {
+function render(data, { scroll = true } = {}) {
   clearErrors();
+  state.last = data;
   state.done = data.step === "done";
   const draw = {
     confirm_tasks: showConfirmation,
@@ -284,7 +355,7 @@ function render(data) {
   }[data.step];
   const content = data.step === "done" ? showFinal(data) : draw(data.question);
   screenBox.replaceChildren(progress(data.step), ...content);
-  screenBox.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (scroll) screenBox.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ---------------------------------------------------------------- pezzi comuni
@@ -299,13 +370,14 @@ const minutesOf = (hhmm) => {
 // Il piano come linea del tempo: orari a sinistra, task a destra e, tra un task e l'altro,
 // il tempo libero. La giornata si legge dall'alto in basso, come in un'agenda.
 function timeline(scheduled) {
-  if (!scheduled.length) return notice("info", "Nessun task nel piano.");
+  if (!scheduled.length) return notice("info", t("no_tasks_in_plan"));
   const items = [];
   scheduled.forEach((slot, i) => {
     const gap = i > 0 ? minutesOf(slot.start) - minutesOf(scheduled[i - 1].end) : 0;
     if (gap > 0) {
       items.push(el("li", { class: "gap" },
-        el("span", { class: "time" }), el("span", { text: `libero ${durationText(gap)}` })));
+        el("span", { class: "time" }),
+        el("span", { text: t("free_time", { duration: durationText(gap) }) })));
     }
     items.push(el("li", { class: "slot" },
       el("span", { class: "time", text: `${slot.start}–${slot.end}` }),
@@ -320,7 +392,7 @@ function timeline(scheduled) {
 function showSchedule(plan, { unscheduled = true } = {}) {
   const parts = [timeline(plan.scheduled)];
   if (unscheduled && plan.unscheduled.length) {
-    parts.push(notice("warning", `Non inseriti: ${plan.unscheduled.join(", ")}`));
+    parts.push(notice("warning", t("left_out", { titles: plan.unscheduled.join(", ") })));
   }
   return parts;
 }
@@ -330,12 +402,15 @@ function showWarnings(summary) {
 }
 
 function showRejected(summary) {
-  return summary.rejected.map((r) => notice("error", `Scartato: ${r.title} (${r.reason})`));
+  return summary.rejected.map((r) => notice("error", t("rejected", r)));
 }
 
 function showPlan(plan, options) {
-  return [heading("Piano della giornata"), ...showSchedule(plan, options), ...showWarnings(plan)];
+  return [heading(t("day_plan")), ...showSchedule(plan, options), ...showWarnings(plan)];
 }
+
+const TASK_COLUMNS = ["col_title", "col_duration", "col_priority", "col_required", "col_start",
+  "col_after", "col_before"];
 
 // La tabella modificabile dei task. Restituisce la tabella e una funzione che legge,
 // riga per riga, i valori che l'utente ha lasciato o cambiato.
@@ -355,15 +430,12 @@ function editTable(tasks) {
     return [task.title, fields.duration_min, fields.priority, fields.required,
       fields.fixed_start, fields.earliest_start, fields.deadline];
   });
-  const view = table(
-    ["Titolo", "Durata (min)", "Priorità", "Obbligatorio", "Inizio", "Dopo le", "Entro le"],
-    rows,
-  );
+  const view = table(TASK_COLUMNS.map((key) => t(key)), rows);
   const read = () => Object.fromEntries(Object.entries(inputs).map(([id, f]) => [id, {
     duration_min: f.duration_min.value === "" ? null : Number(f.duration_min.value),
     priority: Number(f.priority.value),
     required: f.required.checked,
-    ...Object.fromEntries(TIME_FIELDS.map((t) => [t, f[t].value === "" ? null : f[t].value])),
+    ...Object.fromEntries(TIME_FIELDS.map((k) => [k, f[k].value === "" ? null : f[k].value])),
   }]));
   return { view, read };
 }
@@ -385,42 +457,37 @@ function diffEdits(tasks, edited) {
 // ---------------------------------------------------------------- le schermate
 
 function showSavedDay(saved) {
-  const day = italianDate(saved.day_date);
-  if (saved.replaced) {
-    return [notice("warning", `Il piano già salvato per il ${day} verrà sostituito da questo.`)];
-  }
+  const day = shortDate(saved.day_date);
+  if (saved.replaced) return [notice("warning", t("saved_replaced", { day }))];
   return [
-    notice("info", `Hai già un piano per il ${day}: i nuovi task verranno aggiunti negli spazi ` +
-      "liberi, quelli già in agenda restano dove sono."),
-    el("h3", { text: "Già in agenda" }),
+    notice("info", t("saved_merge", { day })),
+    el("h3", { text: t("already_planned") }),
     caption(`«${saved.user_input}»`),
     ...showSchedule(saved),
   ];
 }
 
 function showConfirmation(question) {
-  const parts = [heading("Controlla i task")];
+  const parts = [heading(t("check_tasks"))];
   const saved = question.saved_day;
-  if (saved) parts.push(...showSavedDay(saved), el("h3", { text: "Nuovi task" }));
+  if (saved) parts.push(...showSavedDay(saved), el("h3", { text: t("new_tasks") }));
   let read = () => ({});
   if (question.tasks.length) {
-    parts.push(caption("Puoi cambiare durata, priorità, obbligo e orari prima di pianificare. " +
-      "Svuota un orario per togliere il vincolo."));
+    parts.push(caption(t("check_hint")));
     const editor = editTable(question.tasks);
     parts.push(editor.view);
     read = editor.read;
   } else {
-    parts.push(notice("info", "Nessun task riconosciuto nella frase."));
+    parts.push(notice("info", t("no_tasks_found")));
   }
   parts.push(...showRejected(question), ...showWarnings(question));
 
   // un solo bottone di conferma: diffEdits capisce da solo se qualcosa è cambiato
-  const confirm = button("Conferma e pianifica", (origin) =>
-    answer(diffEdits(question.tasks, read()), "Correzioni non valide", origin), true);
+  const confirm = button(t("confirm_and_plan"), (origin) =>
+    answer(diffEdits(question.tasks, read()), "invalid_edits", origin), true);
   const replace = saved && !saved.replaced
-    ? button("Sostituisci il piano salvato", (origin) =>
-      answer({ ...diffEdits(question.tasks, read()), replace_saved: true }, "Correzioni non valide",
-        origin))
+    ? button(t("replace_saved"), (origin) =>
+      answer({ ...diffEdits(question.tasks, read()), replace_saved: true }, "invalid_edits", origin))
     : null;
   parts.push(buttons(confirm, replace));
   return parts;
@@ -429,31 +496,28 @@ function showConfirmation(question) {
 function showConflict(question) {
   const editor = editTable(question.tasks);
   return [
-    heading("Giornata impossibile"),
-    notice("error", "Questi task obbligatori non possono stare tutti nella giornata. " +
-      "Togli l'obbligo a uno di loro, oppure cambia un orario o una durata."),
+    heading(t("impossible_day")),
+    notice("error", t("impossible_hint")),
     editor.view,
     ...showWarnings(question),
     // niente "continua senza modifiche": un piano impossibile non si può accettare
-    buttons(button("Riprova a pianificare", (origin) =>
-      answer(diffEdits(question.tasks, editor.read()), "Correzioni non valide", origin), true)),
+    buttons(button(t("try_again"), (origin) =>
+      answer(diffEdits(question.tasks, editor.read()), "invalid_edits", origin), true)),
   ];
 }
 
 function showReview(plan) {
   // si arriva qui solo se qualche task non entra: è il motivo della domanda
   const missing = plan.unscheduled;
-  const verb = missing.length === 1 ? "non entra" : "non entrano";
   return [
     ...showPlan(plan, { unscheduled: false }),
     // un messaggio solo, che è anche la domanda: niente "Non inseriti" ripetuto sopra
     el("div", { class: "alert warning" },
-      el("strong", { text: missing.join(", ") }), ` ${verb} nella giornata. Ti va bene così?`),
+      el("strong", { text: missing.join(", ") }),
+      ` ${t(missing.length === 1 ? "does_not_fit_one" : "does_not_fit_many")}`),
     buttons(
-      button("Continua senza modifiche", (origin) =>
-        answer({ accept: true }, "Risposta non valida", origin), true),
-      button("Modifica i task", (origin) =>
-        answer({ accept: false }, "Risposta non valida", origin)),
+      button(t("continue_as_is"), (origin) => answer({ accept: true }, "invalid_answer", origin), true),
+      button(t("edit_tasks"), (origin) => answer({ accept: false }, "invalid_answer", origin)),
     ),
   ];
 }
@@ -461,44 +525,47 @@ function showReview(plan) {
 // Prima i fatti, calcolati in Python; poi il commento del Critico, come opinione.
 function showCritique(critique) {
   const longest = critique.longest_slot;
+  const busy = t("busy_of", {
+    busy: durationText(critique.busy_minutes),
+    total: durationText(critique.total_minutes),
+  });
   const parts = [
     el("div", { class: "metrics" },
-      el("div", { class: "metric", title: `${critique.busy_percent}% della giornata` },
-        el("div", { class: "label", text: "Tempo occupato" }),
-        el("div", { class: "value",
-          text: `${durationText(critique.busy_minutes)} su ${durationText(critique.total_minutes)}` })),
+      el("div", { class: "metric", title: t("busy_percent", { percent: critique.busy_percent }) },
+        el("div", { class: "label", text: t("busy_time") }),
+        el("div", { class: "value", text: busy })),
       el("div", { class: "metric" },
-        el("div", { class: "label", text: "Libero più lungo" }),
-        el("div", { class: "value", text: longest ? `${longest.start}–${longest.end}` : "nessuno" }))),
-    caption("Commento del Critico"),
-    notice("info", critique.assessment),
+        el("div", { class: "label", text: t("longest_free") }),
+        el("div", { class: "value", text: longest ? `${longest.start}–${longest.end}` : t("none") }))),
+    caption(t("critic_comment")),
+    notice("info", critique.assessment), // scritto dal modello, nella lingua scelta
   ];
   const considered = critique.recalled_preferences ?? [];
   if (considered.length) {
-    parts.push(caption(`🧠 Preferenze considerate: ${considered.join("; ")}`));
+    parts.push(caption(t("considered", { list: considered.join("; ") })));
   } else if (state.database) {
-    parts.push(caption("🧠 Nessuna preferenza ricordata finora da considerare."));
+    parts.push(caption(t("nothing_remembered_yet")));
   }
   return parts;
 }
 
 function showSuggestions(question) {
+  const category = (name) => t("categories")[name] ?? name;
   return [
     ...showPlan(question.plan), // il piano su cui il Critico si esprime
-    heading("Il Critico"),
+    heading(t("critic")),
     ...showCritique(question),
-    el("h3", { text: "Suggerimenti del Critico" }),
+    el("h3", { text: t("suggestions") }),
     // per ora non si possono aggiungere al piano (manca il passo nel grafo): dirlo, invece
     // di mostrare qualcosa che sembra cliccabile
-    caption("Per ora sono solo idee: se ti interessano, aggiungile alla prossima frase."),
+    caption(t("suggestions_hint")),
     el("ul", { class: "suggestions" }, ...question.suggestions.map((s) => el("li", { class: "card" },
       el("div", { class: "row" },
         el("strong", { text: s.title }),
-        el("span", { class: "caption", text: `${s.category} · ${durationText(s.duration_min)}` })),
+        el("span", { class: "caption", text: `${category(s.category)} · ${durationText(s.duration_min)}` })),
       el("p", { class: "caption", text: s.reason })))),
     ...showWarnings(question),
-    buttons(button("Continua", (origin) =>
-      answer({ accepted: [] }, "Risposta non valida", origin), true)),
+    buttons(button(t("continue"), (origin) => answer({ accepted: [] }, "invalid_answer", origin), true)),
   ];
 }
 
@@ -513,20 +580,20 @@ function showPreferencesConfirmation(question) {
     const similar = pref.similar.map((saved) => {
       const box = el("input", { type: "checkbox" });
       remove.push([saved.id, box]);
-      return el("label", { class: "check" }, box, `Cancella quella già salvata: ${saved.text}`);
+      return el("label", { class: "check" }, box, t("delete_saved", { text: saved.text }));
     });
     return el("div", { class: "card" },
-      el("label", { class: "check" }, keepBox, el("strong", { text: pref.text })),
+      el("label", { class: "check" }, keepBox, el("strong", { lang: "it", text: pref.text })),
       caption(`«${pref.source}»`),
       ...similar);
   });
   const chosen = (pairs) => pairs.filter(([, box]) => box.checked).map(([id]) => id);
   return [
-    heading("Ho capito queste preferenze"),
-    caption("Spunta quelle da ricordare: le userò per le prossime giornate."),
+    heading(t("preferences_found")),
+    caption(t("preferences_hint")),
     ...cards,
-    buttons(button("Conferma", (origin) =>
-      answer({ keep: chosen(keep), delete: chosen(remove) }, "Risposta non valida", origin), true)),
+    buttons(button(t("confirm"), (origin) =>
+      answer({ keep: chosen(keep), delete: chosen(remove) }, "invalid_answer", origin), true)),
   ];
 }
 
@@ -536,7 +603,7 @@ function showOutcome(result) {
   const saved = result.save_result;
   const parts = [];
   if (saved === null) {
-    parts.push(notice("success", "✅ Piano confermato (senza database non viene salvato)."));
+    parts.push(notice("success", t("confirmed_no_db")));
   } else if (!saved.saved) {
     parts.push(notice("warning", `⚠️ ${saved.message}`)); // non salvato: va notato
   } else {
@@ -544,16 +611,15 @@ function showOutcome(result) {
     parts.push(el("div", { class: "buttons" }, el("a", {
       class: "button primary",
       href: `/days/${state.dayDate}/plan.ics`,
-      text: "📥 Scarica nel calendario",
+      text: t("download"),
     })));
   }
   // il passaggio delle preferenze si vede sempre, anche quando non c'era niente da chiedere
   if (result.preference_candidates !== null) {
     const message = result.preference_result?.message;
     if (message) parts.push(notice("info", `🧠 ${message}`));
-    else if (result.preference_candidates === 0) {
-      parts.push(caption("🧠 Nessuna preferenza da ricordare in questa frase."));
-    } else parts.push(caption("🧠 Nessuna preferenza ricordata."));
+    else if (result.preference_candidates === 0) parts.push(caption(t("no_preferences_in_sentence")));
+    else parts.push(caption(t("nothing_remembered")));
   }
   return parts;
 }
@@ -563,19 +629,20 @@ function showFinal(result) {
   // salvato, il messaggio nomina già i task rimasti fuori: nel piano non si ripetono
   const unscheduled = !result.save_result?.saved;
   return [
-    heading("Il piano è pronto"),
+    heading(t("plan_ready")),
     ...showOutcome(result),
     ...showPlan(result.plan, { unscheduled }),
-    heading("Il Critico"),
+    heading(t("critic")),
     ...showCritique(result.critique),
     // i dettagli servono a chi li cerca: chiusi, non allungano la pagina
     el("details", { class: "more" },
-      el("summary", { text: `Dettagli dei task confermati (${result.tasks.length})` }),
+      el("summary", { text: t("task_details", { count: result.tasks.length }) }),
       // confermati non vuol dire inseriti: la prima colonna dice dove è finito ognuno
       table(
-        ["Nel piano", "Titolo", "Durata (min)", "Priorità", "Obbligatorio", "Inizio", "Dopo le", "Entro le"],
-        result.tasks.map((t) => [t.slot ?? "non inserito", t.title, t.duration_min, t.priority,
-          yes(t.required), t.fixed_start ?? "", t.earliest_start ?? "", t.deadline ?? ""]),
+        ["col_slot", ...TASK_COLUMNS].map((key) => t(key)),
+        result.tasks.map((task) => [task.slot ?? t("not_in_plan"), task.title, task.duration_min,
+          task.priority, yes(task.required), task.fixed_start ?? "", task.earliest_start ?? "",
+          task.deadline ?? ""]),
       ),
       ...showRejected(result)),
   ];
@@ -583,11 +650,23 @@ function showFinal(result) {
 
 // ---------------------------------------------------------------- le finestre
 
-function openDialog(id, fill) {
-  const dialog = document.querySelector(id);
-  const body = dialog.querySelector(".dialog-body");
-  body.replaceChildren(caption("Carico..."));
+// cosa ridisegnare in ogni finestra: lo storico è tutto da caricare, nelle impostazioni solo
+// l'elenco delle preferenze (lingua e tema sono già nella pagina)
+const FILL = {
+  "history-dialog": [".dialog-body", fillHistory],
+  "settings-dialog": ["#preferences-list", fillPreferences],
+};
+
+function openDialog(id) {
+  const dialog = document.querySelector(`#${id}`);
   dialog.showModal(); // finestra modale: Esc la chiude
+  refill(dialog);
+}
+
+function refill(dialog) {
+  const [selector, fill] = FILL[dialog.id];
+  const body = dialog.querySelector(selector);
+  body.replaceChildren(caption(t("loading")));
   fill(body);
 }
 
@@ -598,13 +677,13 @@ async function fillHistory(body) {
     return;
   }
   if (!result.data.length) {
-    body.replaceChildren(notice("info", "Nessuna giornata salvata."));
+    body.replaceChildren(notice("info", t("no_saved_days")));
     return;
   }
   body.replaceChildren(...result.data.flatMap((day) => [
     el("p", {},
-      el("strong", { text: longItalianDate(day.day_date) }),
-      ` · tempo libero ${durationText(day.free_minutes)} · `,
+      el("strong", { text: longDate(day.day_date) }),
+      ` · ${t("free_time_day", { duration: durationText(day.free_minutes) })} · `,
       el("a", { href: `/days/${day.day_date}/plan.ics`, text: "📥 .ics" })),
     caption(`«${day.user_input}»`),
     timeline(day.scheduled),
@@ -612,13 +691,17 @@ async function fillHistory(body) {
 }
 
 async function fillPreferences(body) {
+  if (!state.database) {
+    body.replaceChildren(caption(t("preferences_need_db")));
+    return;
+  }
   const result = await api("GET", "/preferences");
   if (!result.ok) {
     body.replaceChildren(notice("error", errorText(result.data.detail)));
     return;
   }
   if (!result.data.length) {
-    body.replaceChildren(notice("info", "Nessuna preferenza ricordata: nascono dalle frasi delle giornate salvate."));
+    body.replaceChildren(notice("info", t("no_preferences")));
     return;
   }
   const remove = async (id) => {
@@ -627,14 +710,15 @@ async function fillPreferences(body) {
     else fillPreferences(body); // l'elenco ridisegnato è già senza la preferenza cancellata
   };
   body.replaceChildren(
-    caption("Le userò per le prossime giornate. Elimina quelle che non valgono più."),
+    caption(t("preferences_list_hint")),
     ...result.data.map((pref) => {
-      const times = pref.times_seen === 1 ? "1 volta" : `${pref.times_seen} volte`;
+      const seen = pref.times_seen === 1 ? t("seen_once") : t("seen_times", { count: pref.times_seen });
+      const last = t("last_seen", { day: shortDate(pref.last_seen) });
       return el("div", { class: "card row" },
         el("div", {},
-          el("strong", { text: pref.text }),
-          caption(`Vista ${times} · ultima il ${italianDate(pref.last_seen)} · «${pref.source}»`)),
-        button("Elimina", () => remove(pref.id), "danger"));
+          el("strong", { lang: "it", text: pref.text }),
+          caption(`${seen} · ${last} · «${pref.source}»`)),
+        button(t("delete"), () => remove(pref.id), "danger"));
     }),
   );
 }
@@ -646,44 +730,40 @@ function showToast(text) {
   setTimeout(() => (toast.hidden = true), 5000); // scompare da solo
 }
 
+function showBanner(key) {
+  state.bannerKey = key;
+  document.querySelector("#banner").replaceChildren(notice("warning", t(key)));
+}
+
 // ---------------------------------------------------------------- tema chiaro / scuro
 
-const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
-
-// Il tema in uso: quello scelto col bottone, altrimenti quello del sistema.
-function currentTheme() {
-  return document.documentElement.dataset.theme ?? (darkQuery.matches ? "dark" : "light");
+// "system": nessuna scelta salvata, il CSS segue il tema del sistema (prefers-color-scheme)
+function themeChoice() {
+  return document.documentElement.dataset.theme ?? "system";
 }
 
-// Il bottone mostra il tema in cui si passa: 🌙 se ora è chiaro, ☀️ se ora è scuro.
-function updateThemeButton() {
-  const dark = currentTheme() === "dark";
-  const toggle = document.querySelector("#theme");
-  toggle.textContent = dark ? "☀️" : "🌙";
-  toggle.title = dark ? "Tema chiaro" : "Tema scuro";
-  toggle.setAttribute("aria-label", toggle.title);
-}
-
-function toggleTheme() {
-  const next = currentTheme() === "dark" ? "light" : "dark";
-  document.documentElement.dataset.theme = next;
+function setTheme(choice) {
+  if (choice === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = choice;
   // localStorage: la scelta resta per le prossime aperture, solo in questo browser.
   // Può non esserci (finestra anonima, dati bloccati): allora vale solo fino alla chiusura
   try {
-    localStorage.setItem("theme", next);
+    if (choice === "system") localStorage.removeItem("theme");
+    else localStorage.setItem("theme", choice);
   } catch {
     // nessun problema: il tema è già applicato
   }
-  updateThemeButton();
+  markChoices();
 }
 
 // ---------------------------------------------------------------- avvio
 
 async function start() {
-  updateThemeButton();
-  document.querySelector("#theme").addEventListener("click", toggleTheme);
-  // se il tema del sistema cambia mentre la pagina è aperta, il bottone si aggiorna
-  darkQuery.addEventListener("change", updateThemeButton);
+  translateStatic();
+  document.querySelectorAll("#language button").forEach((choice) =>
+    choice.addEventListener("click", () => setLanguage(choice.dataset.language)));
+  document.querySelectorAll("#theme button").forEach((choice) =>
+    choice.addEventListener("click", () => setTheme(choice.dataset.themeChoice)));
 
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -693,17 +773,16 @@ async function start() {
     event.preventDefault(); // niente ricarica: la richiesta la fa fetch, in JSON
     const text = document.querySelector("#text").value.trim();
     if (!text) {
-      showError("Scrivi cosa devi fare.");
+      showError(t("empty_sentence"));
       return;
     }
     // event.submitter: il bottone che ha inviato il modulo (anche con Invio nel campo)
     const origin = event.submitter ?? document.querySelector("#new-plan button[type=submit]");
     startPlanning(text, document.querySelector("#day").value, origin);
   });
-  document.querySelector("#open-history").addEventListener("click", () =>
-    openDialog("#history-dialog", fillHistory));
-  document.querySelector("#open-preferences").addEventListener("click", () =>
-    openDialog("#preferences-dialog", fillPreferences));
+  document.querySelector("#open-history").addEventListener("click", () => openDialog("history-dialog"));
+  document.querySelector("#open-settings").addEventListener("click", () =>
+    openDialog("settings-dialog"));
   document.querySelectorAll("dialog .close").forEach((b) =>
     b.addEventListener("click", () => b.closest("dialog").close()));
 
@@ -712,14 +791,11 @@ async function start() {
   if (!health.ok) {
     showError(errorText(health.data.detail));
   } else if (!state.database) {
-    document.querySelector("#banner").replaceChildren(
-      notice("warning", "Database non raggiungibile: i piani non verranno salvati. Avvia Docker e riavvia l'API."));
+    showBanner("database_down");
   } else {
     document.querySelector("#actions").hidden = false; // senza database i bottoni non ci sono
-    if (health.data.purged) {
-      const days = health.data.purged === 1 ? "1 giornata" : `${health.data.purged} giornate`;
-      showToast(`🧹 Cancellate ${days} più vecchie di 2 settimane.`);
-    }
+    const purged = health.data.purged;
+    if (purged) showToast(purged === 1 ? t("purged_one") : t("purged_many", { count: purged }));
   }
 }
 
