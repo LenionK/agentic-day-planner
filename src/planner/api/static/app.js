@@ -1,5 +1,5 @@
 // La pagina web del planner: un client dell'API, come lo sono i test e /docs.
-// Mostra le stesse schermate dell'interfaccia Streamlit, ma ogni passo è una richiesta HTTP.
+// Ogni schermata è una domanda del grafo, e ogni risposta una richiesta HTTP.
 
 // ---------------------------------------------------------------- stato della pagina
 
@@ -368,7 +368,7 @@ function editTable(tasks) {
   return { view, read };
 }
 
-// Come diff_edits in ui/edits.py: solo i campi cambiati; {"edits": {}} se niente è cambiato.
+// Solo i campi cambiati: {"edits": {}} se niente è cambiato (l'editor del grafo applica il resto).
 function diffEdits(tasks, edited) {
   const edits = {};
   for (const task of tasks) {
@@ -643,7 +643,7 @@ function showToast(text) {
   const toast = document.querySelector("#toast");
   toast.textContent = text;
   toast.hidden = false;
-  setTimeout(() => (toast.hidden = true), 5000); // scompare da solo, come st.toast
+  setTimeout(() => (toast.hidden = true), 5000); // scompare da solo
 }
 
 // ---------------------------------------------------------------- tema chiaro / scuro

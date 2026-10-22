@@ -1,4 +1,4 @@
-/* Un aspetto vicino a quello di Streamlit: colonna centrale, avvisi colorati, bottone rosso.
+/* Colonna centrale, avvisi colorati, un'azione principale per schermata.
    I colori sono variabili (--nome): il tema scuro cambia solo le variabili, non le regole. */
 
 :root {
@@ -20,7 +20,7 @@
   --success-bg: #e6f6ec;   --success-text: #17643a;
 }
 
-/* tema scuro: quello di Streamlit. Vale se lo chiede il sistema (e l'utente non ha scelto
+/* tema scuro. Vale se lo chiede il sistema (e l'utente non ha scelto
    il chiaro col bottone), oppure se l'utente l'ha scelto col bottone (data-theme="dark") */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -87,7 +87,7 @@ input, select, button { font: inherit; color: inherit; }
 input, select { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; background: var(--surface); }
 input:focus, select:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
 
-/* bottoni affiancati e allineati a destra, come in Streamlit */
+/* bottoni affiancati e allineati a destra */
 .buttons { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 12px; }
 /* .button: un link che sembra un bottone (il download del calendario è un link vero) */
 button, .button {

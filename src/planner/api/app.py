@@ -107,7 +107,7 @@ def create_app(graph=None, repository=None, preferences=None) -> FastAPI:
             app.state.graph = build_planner_graph(
                 settings, app.state.repository, app.state.preferences
             )
-            # come in Streamlit: all'avvio si cancellano le giornate più vecchie di 2 settimane
+            # all'avvio si cancellano le giornate più vecchie di 2 settimane
             app.state.purged = app.state.repository.purge_old_days() if app.state.database else 0
         else:
             app.state.database = repository is not None
@@ -133,7 +133,7 @@ def create_app(graph=None, repository=None, preferences=None) -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     def page() -> FileResponse:
-        """The web page to use the planner from a browser, like the Streamlit interface."""
+        """The web page to use the planner from a browser."""
         return FileResponse(STATIC / "index.html")
 
     @app.post("/plans")
