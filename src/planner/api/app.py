@@ -143,6 +143,17 @@ def create_app(graph=None, repository=None, preferences=None) -> FastAPI:
     # app.js e style.css della pagina; la pagina stessa è servita su "/"
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
+    @app.middleware("http")
+    async def revalidate_page_files(request: Request, call_next):
+        # senza Cache-Control il browser può riusare un app.js vecchio con un index.html nuovo:
+        # lo script cerca bottoni che non ci sono più, va in errore e la pagina non risponde.
+        # no-cache = "ricontrolla sempre": con l'ETag invariato il server risponde 304, senza
+        # rimandare il file, quindi resta veloce ma non usa mai una versione vecchia
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     @app.exception_handler(psycopg.OperationalError)
     def database_down(request: Request, exc: psycopg.OperationalError) -> JSONResponse:
         # il database si è spento dopo l'avvio: un 503 chiaro invece di un errore del server

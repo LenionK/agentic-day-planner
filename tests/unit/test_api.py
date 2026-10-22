@@ -318,6 +318,20 @@ def test_page_and_its_files_are_served_outside_the_api_docs():
     assert "/" not in paths  # la pagina non fa parte dell'API
 
 
+def test_the_page_files_are_checked_again_on_every_load():
+    with start_api(FakeClient([])) as client:
+        page = client.get("/")
+        script = client.get("/static/app.js")
+        unchanged = client.get("/static/app.js", headers={"If-None-Match": script.headers["etag"]})
+        health = client.get("/health")
+
+    # un app.js vecchio in cache con una pagina nuova lasciava i bottoni senza risposta
+    assert page.headers["cache-control"] == "no-cache"
+    assert script.headers["cache-control"] == "no-cache"
+    assert unchanged.status_code == 304  # ricontrollare non vuol dire riscaricare
+    assert "cache-control" not in health.headers  # le risposte dell'API non c'entrano
+
+
 def test_health_says_whether_there_is_a_database():
     with start_api(FakeClient([])) as without:
         alone = without.get("/health").json()

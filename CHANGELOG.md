@@ -42,6 +42,8 @@ in English or Italian, with a settings panel. The model runs twice as fast on a 
 ### Fixed
 
 - The history and preferences buttons stayed visible without the database.
+- After an update the buttons of the page could stop answering: the browser reused an old `app.js`
+  with the new page. The page and its files are now served with `Cache-Control: no-cache`.
 
 ## [0.3.0] - 2026-10-20
 
