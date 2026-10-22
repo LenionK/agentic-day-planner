@@ -659,8 +659,26 @@ const FILL = {
 
 function openDialog(id) {
   const dialog = document.querySelector(`#${id}`);
-  dialog.showModal(); // finestra modale: Esc la chiude
+  dialog.showModal(); // finestra modale: la chiudono Esc, la X e un clic sullo sfondo
   refill(dialog);
+}
+
+// Un clic sullo sfondo scuro chiude la finestra. Lo sfondo (::backdrop) fa parte del <dialog>,
+// quindi il clic arriva al dialog stesso: si riconosce dal punto, fuori dal suo riquadro.
+// Conta solo un clic cominciato e finito fuori: chi seleziona del testo dentro la finestra e
+// rilascia il mouse fuori non la vede sparire.
+function closeOnBackdrop(dialog) {
+  const outside = (event) => {
+    const box = dialog.getBoundingClientRect();
+    return event.target === dialog && (event.clientX < box.left || event.clientX > box.right ||
+      event.clientY < box.top || event.clientY > box.bottom);
+  };
+  let pressedOutside = false;
+  dialog.addEventListener("pointerdown", (event) => (pressedOutside = outside(event)));
+  dialog.addEventListener("click", (event) => {
+    if (pressedOutside && outside(event)) dialog.close();
+    pressedOutside = false;
+  });
 }
 
 function refill(dialog) {
@@ -785,6 +803,7 @@ async function start() {
     openDialog("settings-dialog"));
   document.querySelectorAll("dialog .close").forEach((b) =>
     b.addEventListener("click", () => b.closest("dialog").close()));
+  document.querySelectorAll("dialog").forEach(closeOnBackdrop);
 
   const health = await api("GET", "/health");
   state.database = health.ok && health.data.database;

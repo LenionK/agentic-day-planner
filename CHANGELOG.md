@@ -19,6 +19,8 @@ in English or Italian, with a settings panel. The model runs twice as fast on a 
   in the chosen language (a line at the end of the prompts; Italian prompts unchanged); sentences
   are still read in Italian, and preferences stay Italian.
 - **⚙️ Settings** panel: language, theme (System / Light / Dark) and the remembered preferences.
+- The windows (history, settings) also close with a click on the dark background, besides the X
+  and Esc; a text selection dragged out of a window does not close it.
 - README: contents, screenshots of the web page (dark theme, English; the settings in Italian).
 
 ### Changed
