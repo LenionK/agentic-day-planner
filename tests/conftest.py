@@ -36,7 +36,12 @@ def db_url() -> str:
                 # un nome di database non è un valore: si compone con sql.Identifier, non con %s
                 conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(TEST_DB)))
     except psycopg.OperationalError:
-        pytest.skip("database non raggiungibile: avvia Docker e `docker compose up -d`")
+        message = "database non raggiungibile: avvia Docker e `docker compose up -d`"
+        # in CI il database c'è sempre: se manca è un errore, non un test da saltare.
+        # Saltati, i test di integrazione lascerebbero la CI verde senza aver provato niente
+        if os.environ.get("REQUIRE_DATABASE") == "1":
+            pytest.fail(f"{message} (REQUIRE_DATABASE=1: il database è obbligatorio)")
+        pytest.skip(message)
 
     # la stessa funzione che usa l'API all'avvio, sul database di test
     upgrade_database(test_url)

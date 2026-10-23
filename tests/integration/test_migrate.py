@@ -10,13 +10,14 @@ EMPTY_DB = "planner_migrate_test"
 
 
 @pytest.fixture
-def empty_db_url():
-    """A brand-new database with no tables, dropped at the end."""
+def empty_db_url(db_url):
+    """A brand-new database with no tables, dropped at the end.
+
+    It asks for db_url only to share its rule: without the database the test is skipped,
+    or fails with REQUIRE_DATABASE=1 (in CI).
+    """
     main_url = Settings().database_url
-    try:
-        admin = psycopg.connect(main_url, autocommit=True, connect_timeout=3)
-    except psycopg.OperationalError:
-        pytest.skip("database non raggiungibile: avvia Docker e `docker compose up -d`")
+    admin = psycopg.connect(main_url, autocommit=True, connect_timeout=3)
     name = sql.Identifier(EMPTY_DB)
     with admin:
         admin.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(name))

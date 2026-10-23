@@ -2,6 +2,9 @@ import json
 import time
 from pathlib import Path
 
+from ollama import ResponseError
+from pydantic import ValidationError
+
 from planner.agents.parser import parse_day, to_minutes
 from planner.config import Settings
 from planner.llm.factory import build_llm_client
@@ -106,7 +109,10 @@ def main() -> None:
         start = time.perf_counter()
         try:
             result = parse_day(case["text"], client)
-        except Exception as err:
+        # un caso che fallisce non ferma la valutazione: una risposta ancora non valida dopo
+        # i tentativi (ValidationError) o un errore di Ollama su quella richiesta (ResponseError).
+        # Ollama spento (ConnectionError) invece la ferma: fallirebbero tutti i casi uguali
+        except (ValidationError, ResponseError) as err:
             durations.append(time.perf_counter() - start)
             print(f"\n[{i}] ERRORE: {case['text']}\n    {type(err).__name__}: {err}")
             continue

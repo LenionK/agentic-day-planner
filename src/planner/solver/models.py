@@ -42,12 +42,18 @@ class Task(BaseModel):
 
     @model_validator(mode="after")
     def check_window(self) -> Task:
-        if self.earliest_start_min is not None and self.deadline_min is not None:
-            if self.deadline_min - self.earliest_start_min < self.duration_min:
-                raise ValueError("time window is shorter than the task duration")
-        if self.fixed_start_min is not None and self.deadline_min is not None:
-            if self.fixed_start_min + self.duration_min > self.deadline_min:
-                raise ValueError("fixed start makes the task end after its deadline")
+        if (
+            self.earliest_start_min is not None
+            and self.deadline_min is not None
+            and self.deadline_min - self.earliest_start_min < self.duration_min
+        ):
+            raise ValueError("time window is shorter than the task duration")
+        if (
+            self.fixed_start_min is not None
+            and self.deadline_min is not None
+            and self.fixed_start_min + self.duration_min > self.deadline_min
+        ):
+            raise ValueError("fixed start makes the task end after its deadline")
         return self
 
 
