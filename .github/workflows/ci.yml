@@ -1,0 +1,62 @@
+# La CI: a ogni push su main e a ogni pull request, su una macchina pulita, lint e test.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# il workflow legge solo il codice: un'action compromessa non potrebbe scrivere nel repository
+permissions:
+  contents: read
+
+jobs:
+  # stile e formattazione: pochi secondi, in parallelo ai test
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13" # tra virgolette: senza, YAML legge un numero ("3.10" diventerebbe 3.1)
+          cache: pip # le dipendenze scaricate restano tra un run e l'altro, legate a pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Ruff check
+        run: python -m ruff check src tests
+      - name: Ruff format
+        run: python -m ruff format --check src tests
+
+  # tutti i test, compresi quelli sul database
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # lo stesso database del docker-compose.yml: usa e getta, vive solo durante il job
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: planner
+          POSTGRES_PASSWORD: planner
+          POSTGRES_DB: planner
+        # 5433 come sul PC: è l'indirizzo di default in Settings, nessuna configurazione da cambiare
+        ports:
+          - "5433:5432"
+        # i test partono solo quando il database risponde
+        options: >-
+          --health-cmd "pg_isready -U planner"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # senza database i test devono fallire, non essere saltati: verde vuol dire provato davvero
+      REQUIRE_DATABASE: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Tests
+        run: python -m pytest
