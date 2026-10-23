@@ -1,5 +1,7 @@
 # agentic-day-planner
 
+[![CI](https://github.com/LenionK/agentic-day-planner/actions/workflows/ci.yml/badge.svg)](https://github.com/LenionK/agentic-day-planner/actions/workflows/ci.yml)
+
 Local-first agentic day planner: describe your day in plain language and get an optimized schedule,
 saved day by day, with a memory of your preferences.
 LangGraph + Ollama + OR-Tools CP-SAT + PostgreSQL/pgvector, 100% free stack.
